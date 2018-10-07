@@ -1,9 +1,9 @@
 CC=gcc
 CFLAGS+=-std=c99 -Wall -I. -O3 -lrt -g
 
-DEPS = fq.h st.h st_inline.h barser.h barser_defaults.h
-OBJ1 = fq.o st.o barser.o barser_test.o
-OBJ2 = fq.o st.o barser.o barser_example.o
+DEPS = rbt/fq.h rbt/st.h rbt/st_inline.h barser.h barser_defaults.h
+OBJ1 = rbt/fq.o rbt/st.o barser.o barser_test.o
+OBJ2 = rbt/fq.o rbt/st.o barser.o barser_example.o
 
 %.o: %.c $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)
@@ -17,4 +17,4 @@ barser_example: $(OBJ2)
 .PHONY: clean
 
 clean:
-	rm -rf *.o *~ core barser_test barser_example
+	rm -rf *.o *~ core barser_test barser_example rbt/*.o
