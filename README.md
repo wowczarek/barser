@@ -8,7 +8,7 @@ It will parse JSON and many other variants of curly bracket syntax, but the nati
 
 Work in progress. At this time (8 Oct 2018) Barser passes feedback tests (generating an output file (2) from an original source input file (1), and then parsing its own output to produce another output (3) - (2) and (3) are identical.
 
-###Features:
+### Features:
 
 - Parsing files and dumping the ouput
 - User-friendly parser error output (line number / position, contents of the affected line
@@ -18,7 +18,7 @@ Work in progress. At this time (8 Oct 2018) Barser passes feedback tests (genera
 - Support for basic escape characters in quoted strings
 - Character classes and meanings all defined in a separate header file, `barser_defaults.h`
 
-###Plans:
+### Plans:
 
 - Implement indexing of inserted tree nodes using a red-black tree index
 - Implement a simple query language (direct queries in the form of "/node/child/grandchild" will be supported as soon as indexing is implemented
