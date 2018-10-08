@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS+=-std=c99 -Wall -I. -O3 -lrt -g
+CFLAGS+=-std=c99 -Wall -I. -O3 -lrt
 
 DEPS = rbt/fq.h rbt/st.h rbt/st_inline.h barser.h barser_defaults.h
 OBJ1 = rbt/fq.o rbt/st.o barser.o barser_test.o
