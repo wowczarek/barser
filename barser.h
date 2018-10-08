@@ -133,10 +133,11 @@ enum {
     BP_PERROR_UNEXPECTED,	/* unexpected character */
     BP_PERROR_EXP_ID,		/* expected identifier / name */
     BP_PERROR_UNEXP_ID,		/* unexpected identifier */
+    BP_PERROR_TOKENS,		/* too many consecutive identifiers */
     BP_PERROR_LEVEL,		/* unbalanced brackes */
     BP_PERROR_BLOCK,		/* unexpected structure element */
     BP_PERROR_NULL,		/* uninitialised / NULL dictionary */
-    BP_PERROR			/* generic / other error */
+    BP_PERROR			/* generic / internal / other error */
 };
 
 /* node operation result codes */
@@ -149,7 +150,7 @@ enum {
 };
 
 /* shorthand macro to check if (int!) c is a character of class cl (above) */
-#define chclass(c, cl) (chflags[c] & cl)
+#define chclass(c, cl) (chflags[c] & (cl))
 
 /* parser state container */
 typedef struct {
@@ -170,7 +171,6 @@ typedef struct {
 
     size_t slinepos;		/* line position when entered state */
     size_t slineno;		/* line number when entered state */
-
 
     /* scanner state */
     unsigned int scanState;
@@ -201,8 +201,12 @@ struct BarserNode {
     size_t _pathLen;			/* path length */
     int childCount;			/* fat bastard on benefits and dodgy DLA */
     unsigned int type;			/* type enum */
-    bool quotedValue;			/* waste of space, but... convenience */
+    unsigned int flags;			/* flags - quoted name, quoted value, etc. */
 };
+
+/* node flags */
+#define BP_QUOTED_VALUE	(1<<0)
+#define BP_QUOTED_NAME	(1<<1)
 
 /* the dictionary */
 struct BarserDict {
@@ -215,11 +219,20 @@ size_t getFileBuf(char **buf, const char *fileName);
 /* create and initialise a dictionary */
 BarserDict *createBarserDict(const char *name);
 
+/* create new node in dictionary, attached to parent, of type type with name name */
+BarserNode* createBarserNode(BarserDict *dict, BarserNode *parent, const unsigned int type, const char* name);
+
+/* clean up and free dictionary */
+void freeBarserDict(BarserDict *dict);
+
 /* parse contents of a char buffer */
 BarserState barseBuffer(BarserDict *dict, char *buf, size_t len);
 
 /* display parser error */
 void printBarserError(BarserState *state);
+
+/* recursively dump a node (like the root) */
+void dumpBarserNode(BarserNode *node, int level);
 
 #endif /* BARSER_H_ */
 

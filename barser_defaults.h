@@ -37,7 +37,14 @@
 #define BARSER_DEFAULTS_H_
 
 /* control characters */
-#define BP_ENDVAL_CHAR		';'		/* end of value*/
+
+/*
+ * Up to BP_ENDVAL5_CHAR can be defined here, they are ifdef'd in barser.c.
+ * BP_ENDVAL1_CHAR must be defined
+ */
+#define BP_ENDVAL1_CHAR		';'		/* end of value, Juniper style */
+#define BP_ENDVAL2_CHAR		','		/* end of value, JSON style*/
+
 #define BP_STARTBLOCK_CHAR	'{'		/* start of block */
 #define BP_ENDBLOCK_CHAR	'}'		/* end of block */
 #define BP_SGLQUOTE_CHAR	'\''		/* double quote character */
@@ -51,11 +58,36 @@
 #define BP_ARRAYSEP_CHAR	','		/* optional, really used for output only */
 #define BP_INDENT_CHAR		' '		/* indentation */
 
+/*
+ * Special escapable characters - 0 to 5 can be defined (none or any from 1...5),
+ * in pairs. Only makes sense to list control characters here (in ASCII sense),
+ * otherwise any escaped character that is not one of the below, is placed
+ * in the string directly, quotes etc, we are clever like that, yo.
+ */
+
+#define BP_ESCHAR1_CODE 't'
+#define BP_ESCHAR1_VAL  '\t'
+
+#define BP_ESCHAR2_CODE 'n'
+#define BP_ESCHAR2_VAL  '\n'
+
+#define BP_ESCHAR3_CODE BP_ESCAPE_CHAR /* the '\' itself */
+#define BP_ESCHAR3_VAL  BP_ESCAPE_CHAR
+
+#define BP_ESCHAR4_CODE 'r'
+#define BP_ESCHAR4_VAL  '\r'
+
 /* maximum line length displayed when showing an error */
 #define BP_ERRORDUMP_LINEWIDTH 80
 
 /* indent size - if space is chosen, can be say 4 or 8 */
 #define BP_INDENT_WIDTH 4
+
+/* initial allocation size for a quoted string */
+#define BP_QUOTED_STARTSIZE 100
+
+/* maximum number of consecutive tokens when declaring a value - we have to stop somewhere... */
+#define BP_MAX_TOKENS 10
 
 /* character class flags */
 #define BF_NON		0	/* no flags */
@@ -118,7 +150,7 @@ static const char chflags[256] = {
     [ 41] = BF_ILL | BF_NON /* )   */, [105] = BF_TOK | BF_NON /* i   */, [169] = BF_ILL | BF_NON, [233] = BF_ILL | BF_NON,
     [ 42] = BF_TOK | BF_NON /* *   */, [106] = BF_TOK | BF_NON /* j   */, [170] = BF_ILL | BF_NON, [234] = BF_ILL | BF_NON,
     [ 43] = BF_ILL | BF_NON /* +   */, [107] = BF_TOK | BF_NON /* k   */, [171] = BF_ILL | BF_NON, [235] = BF_ILL | BF_NON,
-    [ 44] = BF_SPC | BF_NON /* ,   */, [108] = BF_TOK | BF_NON /* l   */, [172] = BF_ILL | BF_NON, [236] = BF_ILL | BF_NON,
+    [ 44] = BF_CTL | BF_NON /* ,   */, [108] = BF_TOK | BF_NON /* l   */, [172] = BF_ILL | BF_NON, [236] = BF_ILL | BF_NON,
     [ 45] = BF_TOK | BF_NON /* -   */, [109] = BF_TOK | BF_NON /* m   */, [173] = BF_ILL | BF_NON, [237] = BF_ILL | BF_NON,
     [ 46] = BF_TOK | BF_NON /* .   */, [110] = BF_TOK | BF_NON /* n   */, [174] = BF_ILL | BF_NON, [238] = BF_ILL | BF_NON,
     [ 47] = BF_TOK | BF_NON /* /   */, [111] = BF_TOK | BF_NON /* o   */, [175] = BF_ILL | BF_NON, [239] = BF_ILL | BF_NON,

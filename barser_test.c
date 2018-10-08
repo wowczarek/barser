@@ -58,21 +58,57 @@ int main(int argc, char **argv) {
     DUR_INIT(test);
     char* buf = NULL;
 
-    size_t len = getFileBuf(&buf, argv[1]);
+    size_t len;
+
+    if(argc < 2) {
+
+	fprintf(stderr, "Error: no arguments given.\n\nUsage: %s <filename> [-p]\n\n-p\t\t dump parsed contents\n\n",
+		argv[0]);
+
+	return -1;
+
+    }
+
+
 
     BarserDict *dict = createBarserDict("test");
 
+    fprintf(stderr, "Loading %s into memory... ", argv[1]);
+    fflush(stderr);
+
     DUR_START(test);
-    BarserState state = barseBuffer(dict, buf, len);
-    DUR_END(test);
+    len = getFileBuf(&buf, argv[1]);
 
-    printf("Parsed in %llu ns, %.03f MB/s\n", test_delta, (1000000000.0 / test_delta) * (len / 1000000.0));
-
-    if(state.parseError) {
-	printBarserError(&state);
+    if(len <= 0 || buf == NULL) {
+	fprintf(stderr, "Error: could not read input file\n");
     }
 
-    free(dict);
+    DUR_END(test);
+    fprintf(stderr, "done.\n");
+
+    fprintf(stderr, "Loaded %zu bytes in %llu ns, %.03f MB/s\n", len, test_delta, (1000000000.0 / test_delta) * (len / 1000000.0));
+
+    fprintf(stderr, "Parsing data... ");
+    fflush(stderr);
+
+    DUR_START(test);
+    BarserState state = barseBuffer(dict, buf, len);
+
+    DUR_END(test);
+
+    fprintf(stderr, "done.\n");
+    fprintf(stderr, "Parsed in %llu ns, %.03f MB/s\n", test_delta, (1000000000.0 / test_delta) * (len / 1000000.0));
+
+    if(state.parseError) {
+
+	printBarserError(&state);
+
+    } else if(argc >= 3 && !strcmp(argv[2], "-p")) {
+
+	dumpBarserNode(dict->root,0);
+    }
+
+    freeBarserDict(dict);
 
     free(buf);
 
