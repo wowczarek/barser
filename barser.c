@@ -100,13 +100,6 @@ enum {
     BP_SKIP_MLCOMMENT		/* skipping a multiline comment until end of comment */
 };
 
-/* parser state machine */
-enum {
-    BP_GET_NAME = 0,		/* awaiting identifier */
-    BP_GET_VALUE,		/* awaiting value */
-    BP_GOT_VALUE		/* got value, awaiting children or end of entry */
-};
-
 /* parser events */
 enum {
     BP_NONE = 0,		/* nothing happened, keep scanning */
@@ -133,12 +126,12 @@ enum {
 				st->lineno = st->slineno;\
 				st->linepos = st->slinepos;
 
-
 /* initialise parser state */
-static inline void initBarserState(BarserState *state, char* buf, const size_t bufsize) {
+static void initBarserState(BarserState *state, char* buf, const size_t bufsize) {
 
     state->current = buf;
     state->prev = '\0';
+    state->c = buf[0];
     state->end = buf + bufsize;
 
     state->str = NULL;
@@ -155,7 +148,6 @@ static inline void initBarserState(BarserState *state, char* buf, const size_t b
 
     state->scanState = BP_SKIP_WHITESPACE;
 
-    state->parseState = BP_GET_NAME;
     state->parseEvent = BP_NONE;
     state->parseError = BP_PERROR_NONE;
 
@@ -172,6 +164,7 @@ static inline int barserForward(BarserState *state) {
     }
 
     int c = *state->current;
+    state->c = c;
 
     if(c == '\0') {
 	return EOF;
@@ -184,7 +177,7 @@ static inline int barserForward(BarserState *state) {
 	    state->linestart = state->current;
 	    state->lineno++;
 	    state->linepos = 0;
-	} else printf("not advancing\n");
+	}
 
     } else {
 	state->linepos++;
@@ -301,66 +294,102 @@ static inline bool cckConfigNodePathMatch(CckConfigNode *node, const char *path)
 
 #endif
 
-static inline void printQuoted(char *src, bool quoted) {
+static inline int printQuoted(FILE* fl, char *src, bool quoted) {
 
+    int ret;
     int c;
 
     if(quoted) {
 
-	printf("%c", BP_DBLQUOTE_CHAR);
+	ret = fprintf(fl, "%c", BP_DBLQUOTE_CHAR);
+	if(ret < 0) {
+	    return -1;
+	    }
 
 	for(char *marker = src; c = *marker, c != '\0'; marker++) {
 
 	    switch(c) {
 #if (defined(BP_ESCHAR1_CODE) && defined(BP_ESCHAR1_VAL))
 		case BP_ESCHAR1_VAL:
-		    printf("%c%c", BP_ESCAPE_CHAR, BP_ESCHAR1_CODE);
+		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_ESCHAR1_CODE);
+		    if(ret < 0) {
+			return -1;
+		    }
 		    break;
 #endif
 #if (defined(BP_ESCHAR2_CODE) && defined(BP_ESCHAR2_VAL))
 		case BP_ESCHAR2_VAL:
-		    printf("%c%c", BP_ESCAPE_CHAR, BP_ESCHAR2_CODE);
+		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_ESCHAR2_CODE);
+		    if(ret < 0) {
+			return -1;
+		    }
 		    break;
 #endif
 #if (defined(BP_ESCHAR3_CODE) && defined(BP_ESCHAR3_VAL))
 		case BP_ESCHAR3_VAL:
-		    printf("%c%c", BP_ESCAPE_CHAR, BP_ESCHAR3_CODE);
+		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_ESCHAR3_CODE);
+		    if(ret < 0) {
+			return -1;
+		    }
 		    break;
 #endif
 #if (defined(BP_ESCHAR4_CODE) && defined(BP_ESCHAR4_VAL))
 		case BP_ESCHAR4_VAL:
-		    printf("%c%c", BP_ESCAPE_CHAR, BP_ESCHAR4_CODE);
+		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_ESCHAR4_CODE);
+		    if(ret < 0) {
+			return -1;
+		    }
 		    break;
 #endif
 #if (defined(BP_ESCHAR5_CODE) && defined(BP_ESCHAR5_VAL))
 		case BP_ESCHAR5_VAL:
-		    printf("%c%c", BP_ESCAPE_CHAR, BP_ESCHAR5_CODE);
+		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_ESCHAR5_CODE);
+		    if(ret < 0) {
+			return -1;
+		    }
 		    break;
 #endif
+		case BP_SGLQUOTE_CHAR:
+		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_SGLQUOTE_CHAR);
+		    if(ret < 0) {
+			return -1;
+		    }
+		    break;
+
+		case BP_DBLQUOTE_CHAR:
+		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_DBLQUOTE_CHAR);
+		    if(ret < 0) {
+			return -1;
+		    }
+		    break;
+
 		default:
-		    printf("%c", c);
+		    ret = fprintf(fl, "%c", c);
+		    if(ret < 0) {
+			return -1;
+		    }
 	    };
 
 	}
 
-	printf("%c", BP_DBLQUOTE_CHAR);
+	ret = fprintf(fl, "%c", BP_DBLQUOTE_CHAR);
 
     } else {
-	printf("%s", src);
+	ret = fprintf(fl, "%s", src);
+	if(ret < 0) {
+	    return -1;
+	}
     }
+
+    return 0;
 
 }
 
-void
-dumpBarserNode(BarserNode *node, int level)
+static int
+dumpBarserNode(FILE* fl, BarserNode *node, int level)
 {
-
+    int ret = 0;
     bool noIndentArray = true;
-
-/*
-    char memberSepChar = BP_ARRAYSEP_CHAR;
-    char endValueChar = BP_ENDVAL_CHAR;
-*/
 
     /* allocate enough indentation space for current level + 1 */
     int maxwidth = (level + 1) * BP_INDENT_WIDTH;
@@ -374,23 +403,32 @@ dumpBarserNode(BarserNode *node, int level)
     /* fill up the buffer with indent char, but up to current level only */
     memset(indent, BP_INDENT_CHAR, maxwidth);
     memset(indent + level * BP_INDENT_WIDTH, '\0', BP_INDENT_WIDTH);
-    indent[maxwidth] = '\0';
     /* yessir... */
-
+    indent[maxwidth] = '\0';
 
     if(node->type != BP_NODE_COLLECTION) {
-	printf("%s", inArray && noIndentArray && !hadBranchSibling ? " " : indent);
-
+	ret = fprintf(fl, "%s", inArray && noIndentArray && !hadBranchSibling ? " " : indent);
+	if(ret < 0) {
+	    return -1;
+	}
 	if(node->parent != NULL) {
 
 	    if(!inArray) {
 		if(inCollection) {
-		    printQuoted(node->parent->name, node->parent->flags & BP_QUOTED_NAME);
-		    printf(" ");
+		    ret = printQuoted(fl, node->parent->name, node->parent->flags & BP_QUOTED_NAME);
+		    if(ret < 0) {
+			return -1;
+		    }
+		    ret = fprintf(fl, " ");
+		    if(ret < 0) {
+			return -1;
+		    }
 		}
 
-		printQuoted(node->name, node->flags & BP_QUOTED_NAME);
-
+		ret = printQuoted(fl, node->name, node->flags & BP_QUOTED_NAME);
+		if(ret < 0) {
+		    return -1;
+		}
 	    }
 	}
 
@@ -402,24 +440,42 @@ dumpBarserNode(BarserNode *node, int level)
 	    if(node->value && strlen(node->value)) {
 
 		if(!inArray) {
-		    printf(" ");
+		    ret = fprintf(fl, " ");
+		    if(ret < 0) {
+			return -1;
+		    }
 		}
 
-		printQuoted(node->value, node->flags & BP_QUOTED_VALUE);
-
-		if(!inArray) {
-		    printf("%c", BP_ENDVAL1_CHAR);
+		printQuoted(fl, node->value, node->flags & BP_QUOTED_VALUE);
+		if(ret < 0) {
+		    return -1;
 		}
 
 		if(!inArray) {
-		    printf("\n");
+		    ret = fprintf(fl, "%c", BP_ENDVAL1_CHAR);
+		    if(ret < 0) {
+			return -1;
+		    }
+		}
+
+		if(!inArray) {
+		    ret = fprintf(fl, "\n");
+		    if(ret < 0) {
+			return -1;
+		    }
 		}
 	    } else {
 		if(!inArray) {
-		    printf("%c", BP_ENDVAL1_CHAR);
+		    ret = fprintf(fl, "%c", BP_ENDVAL1_CHAR);
+		    if(ret < 0) {
+			return -1;
+		    }
 		}
 		if(!isArray || !noIndentArray) {
-		    printf("\n");
+		    ret = fprintf(fl, "\n");
+		    if(ret < 0) {
+			return -1;
+		    }
 		}
 
 	    }
@@ -429,10 +485,16 @@ dumpBarserNode(BarserNode *node, int level)
 
 	if(node->type != BP_NODE_ROOT) {
 	    if(node->type != BP_NODE_COLLECTION) {
-		printf( "%s%c", strlen(node->name) ? " " : "",
+		ret = fprintf(fl,  "%s%c", strlen(node->name) ? " " : "",
 		    isArray ? BP_STARTARRAY_CHAR : BP_STARTBLOCK_CHAR);
+		if(ret < 0) {
+		    return -1;
+		}
 		if(!isArray || !noIndentArray) {
-		    printf("\n");
+		    ret = fprintf(fl, "\n");
+		    if(ret < 0) {
+			return -1;
+		    }
 		}
 	    }
 	}
@@ -442,30 +504,60 @@ dumpBarserNode(BarserNode *node, int level)
 	LL_FOREACH_DYNAMIC(node, n) {
 
 	    if(node->type == BP_NODE_COLLECTION) {
-		dumpBarserNode(n, level);
+		ret = dumpBarserNode(fl, n, level);
+		if(ret < 0) {
+		    return -1;
+		}
 	    } else {
-		dumpBarserNode(n, level + (node->parent != NULL));
+		ret = dumpBarserNode(fl, n, level + (node->parent != NULL));
+		if(ret < 0) {
+		    return -1;
+		}
 	    }
 	}
 	/* decrease indent again */
 	memset(indent + (level) * BP_INDENT_WIDTH, '\0', BP_INDENT_WIDTH);
 	if(node->type != BP_NODE_ROOT) {
 	    if(node->type != BP_NODE_COLLECTION) {
-		printf("%s", isArray && noIndentArray ? " " : indent);
+		ret = fprintf(fl, "%s", isArray && noIndentArray ? " " : indent);
+		if(ret < 0) {
+			return -1;
+		}
 		if(isArray) {
-		    printf("%c", BP_ENDARRAY_CHAR);
+		    ret = fprintf(fl, "%c", BP_ENDARRAY_CHAR);
+		    if(ret < 0) {
+			return -1;
+		    }
 		    if(!inArray) {
-			printf("%c", BP_ENDVAL1_CHAR);
+			ret = fprintf(fl, "%c", BP_ENDVAL1_CHAR);
+			if(ret < 0) {
+			    return -1;
+			}
 		    }
 		} else {
-		    printf("%c", BP_ENDBLOCK_CHAR);
+		    ret = fprintf(fl, "%c", BP_ENDBLOCK_CHAR);
+		    if(ret < 0) {
+			return -1;
+		    }
+
 		}
 	    }
 	}
-	if(node->type != BP_NODE_COLLECTION) printf("\n");
+	if(node->type != BP_NODE_COLLECTION) {
+	    ret = fprintf(fl, "\n");
+	    if(ret < 0) {
+		return -1;
+	    }
+	}
 
     }
 
+    return 0;
+
+}
+
+void dumpBarserDict(FILE* fl, BarserDict *dict) {
+    dumpBarserNode(fl, dict->root,0);
 }
 
 void
@@ -537,6 +629,7 @@ BarserNode* createBarserNode(BarserDict *dict, BarserNode *parent, const unsigne
     }
 
     ret->dict = dict;
+    dict->nodecount++;
     return ret;
 
 onerror:
@@ -574,6 +667,8 @@ deleteBarserNode(BarserDict *dict, BarserNode *node)
 	node->parent->childCount--;
 	freeBarserNode(node);
     }
+
+    dict->nodecount--;
 
     return BP_NODE_OK;
 }
@@ -957,6 +1052,8 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
     BarserState state;
     int c = 0;
 
+    initBarserState(&state, buf, len);
+
     if(dict == NULL) {
 	state.parseError = BP_PERROR_NULL;
 	return state;
@@ -966,7 +1063,7 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
     PST_INIT(tokenstack);
     PST_INIT(nodestack);
     DST_INIT(quotestack);
-    initBarserState(&state, buf, len);
+
     c = buf[0];
 
     /* keep parsing until no more data or parser error encountered */

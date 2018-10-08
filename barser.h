@@ -37,6 +37,7 @@
 #define BARSER_H_
 
 #include <stdbool.h>
+#include <stdlib.h>
 #include "linked_list.h"
 
 /* BarserNode / BarserDict is a simple hierarchical data parser,
@@ -89,41 +90,15 @@
      *		car { "yoshi" { model "camry"; } "toshi" { model "impreza";} "hoshiboshi" { model "accord"; }}
      * }}
      *
-     * ----- PROPERTYLIST node:
-     *
-     * Property list type node may only belong to a collection, and functions like a branch or leaf, but
-     * may be displayed along with the collection and instance names:
-     *
-     * { haruki {
-     * 	    car yoshi age 6;
-     * 	    car toshi age 9;
-     * 	    car hoshiboshi age 0.5;
-     * 	}}
-     *
-     * the above is equivalent to:
-     *
-     * { haruki {
-     * 	    car yoshi { age 6 };
-     * 	    car toshi { age 9 };
-     * 	    car hoshiboshi { age 0.5 };
-     * 	}}
-     *
-     * or:
-     *
-     * { haruki {
-     * 	    car { "yoshi" { age 6 }; "toshi" { age 9 }; "hoshiboshi" { age 0.5 }; }
-     * 	}}
-     *
      */
 
 /* node types */
 enum {
-    BP_NODE_BRANCH = 0,
+    BP_NODE_ROOT = 0,
+    BP_NODE_BRANCH,
     BP_NODE_LEAF,
     BP_NODE_ARRAY,
     BP_NODE_COLLECTION,
-    BP_NODE_PROPERTYLIST,
-    BP_NODE_ROOT
 };
 
 /* parser error codes */
@@ -158,6 +133,7 @@ typedef struct {
     /* scanner positions */
     char *current;		/* current character */
     int prev;			/* previous character */
+    int c;			/* current character */
     char *end;			/* buffer end marker */
 
     char *str;			/* last token grabbed */
@@ -176,7 +152,6 @@ typedef struct {
     unsigned int scanState;
 
     /* parser state */
-    unsigned int parseState;	/* parser state */
     unsigned int parseEvent;	/* last parse event */
     unsigned int parseError;	/* code of last error */
 
@@ -212,6 +187,7 @@ struct BarserNode {
 struct BarserDict {
     BarserNode *root;		/* root node */
     char *name;			/* well, a name */
+    size_t nodecount;		/* total node count. */
 };
 
 size_t getFileBuf(char **buf, const char *fileName);
@@ -231,8 +207,8 @@ BarserState barseBuffer(BarserDict *dict, char *buf, size_t len);
 /* display parser error */
 void printBarserError(BarserState *state);
 
-/* recursively dump a node (like the root) */
-void dumpBarserNode(BarserNode *node, int level);
+/* output dictionary contents to file */
+void dumpBarserDict(FILE* fl, BarserDict *dict);
 
 #endif /* BARSER_H_ */
 

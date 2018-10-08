@@ -4,14 +4,14 @@
 
 Barser is a general-purpose flexible hierarchical configurational parser / dictionary with a tree structure.
 
-Although Barser will parse JSON files, it is not a JSON parser. An alternative parse function could be written to deal with JSON specifically - and it would be much faster because it would not have to deal with special cases, namely multiple consecutive tokens. Barser will parse JSON and many other variants of curly bracket syntax, but the native format it can work with is similar to Juniper Networks' JunOS configuration files.
+Although Barser will parse JSON files, it is not a JSON parser. An alternative parse function could be written to deal with JSON specifically - and it would be much faster because it would not have to deal with special cases, namely multiple consecutive tokens. Barser will parse JSON and many other variants of curly bracket syntax, but the native format it can work with is similar to Juniper Networks' JunOS configuration files (or actually gated if you still remember it).
 
 Barser is work in progress. At this time (8 Oct 2018) Barser passes feedback tests (generating an output file (2) from an original source input file (1), and then parsing its own output to produce another output (3) - (2) and (3) are identical.
 
 ### Features:
 
 - Parsing files and dumping the ouput
-- User-friendly parser error output (line number / position, contents of the affected line
+- User-friendly parser error output (line number / position, contents of the affected line)
 - Very loose and flexible input format
 - Support for C-style and Unix-style comments
 - Support for C-style multiline comments
@@ -30,10 +30,10 @@ Barser is work in progress. At this time (8 Oct 2018) Barser passes feedback tes
 
 ### Supported data format
 
-For the lack of a proper reference / 
+For the lack of a proper reference / standard, here is some loose information about the input format.
 
 
-Barser was developed around the concepts used in JunOS config files (but Extreme Networks and XORP use similar formats), because they felt like a useful thing to have. Concepts such as "instances". An collection of instances looks like this:
+Barser was developed around the concepts used in gated / JunOS config files (but Extreme Networks and XORP use similar formats), because they felt like a useful thing to have. Concepts such as "instances". An collection of instances looks like this:
 
 ```
 cars {

@@ -35,6 +35,7 @@
 
 /* because clock_gettime */
 #define _POSIX_C_SOURCE 199309L
+#define _XOPEN_SOURCE 500 /* because strdup */
 
 #include <stdio.h>
 #include <stdint.h>
@@ -86,7 +87,8 @@ int main(int argc, char **argv) {
     DUR_END(test);
     fprintf(stderr, "done.\n");
 
-    fprintf(stderr, "Loaded %zu bytes in %llu ns, %.03f MB/s\n", len, test_delta, (1000000000.0 / test_delta) * (len / 1000000.0));
+    fprintf(stderr, "Loaded %zu bytes in %llu ns, %.03f MB/s\n",
+		len, test_delta, (1000000000.0 / test_delta) * (len / 1000000.0));
 
     fprintf(stderr, "Parsing data... ");
     fflush(stderr);
@@ -97,7 +99,9 @@ int main(int argc, char **argv) {
     DUR_END(test);
 
     fprintf(stderr, "done.\n");
-    fprintf(stderr, "Parsed in %llu ns, %.03f MB/s\n", test_delta, (1000000000.0 / test_delta) * (len / 1000000.0));
+    fprintf(stderr, "Parsed in %llu ns, %.03f MB/s, %zu nodes, %.0f nodes/s\n",
+		test_delta, (1000000000.0 / test_delta) * (len / 1000000.0),
+		dict->nodecount, (1000000000.0 / test_delta) * dict->nodecount);
 
     if(state.parseError) {
 
@@ -105,7 +109,8 @@ int main(int argc, char **argv) {
 
     } else if(argc >= 3 && !strcmp(argv[2], "-p")) {
 
-	dumpBarserNode(dict->root,0);
+	dumpBarserDict(stdout, dict);
+
     }
 
     freeBarserDict(dict);
