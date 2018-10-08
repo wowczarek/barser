@@ -132,3 +132,4 @@ Yes, this is all very loose, but *flexible* is the key.
 
 Barser scans the input buffer byte by byte, skipping whitespaces, waiting for control characters and recognising character classes based on a 256-slot lookup table. As the scanner state machine passes through different stages, events are raised and processed accordingly. Barser accumulates string tokens in a stack and processes them once a specific control element or token count is reached - the scanner raises an event which is then picked up by the worker function inserting nodes.
 
+Barser uses strdup() extensively - it does not reuse the existing buffer. The buffer could come from mmap for example - and what happens then? Also the dictionary is to be mutable. For those reasons strings are dynamically allocated and live in the dictionary.
