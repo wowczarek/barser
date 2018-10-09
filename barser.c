@@ -40,8 +40,8 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
+
+//#include <unistd.h>
 #include <string.h>
 
 #include "rbt/st_inline.h"
@@ -201,50 +201,46 @@ static inline int barserPeek(BarserState *state) {
 /* allocate buffer. put file in buffer. return size. */
 size_t getFileBuf(char **out, const char *fileName) {
 
-    struct stat fst;
     char *buf = NULL;
+    size_t size;
     FILE *fl = fopen(fileName, "r");
 
-    if(fl == NULL) {
-	*out = NULL;
+    if(fl == NULL || fseek(fl, 0, SEEK_END) < 0 || (size = ftell(fl)) < 0) {
+	*out = 0;
 	return 0;
     }
 
-    int flfd = fileno(fl);
-    memset(&fst, 0, sizeof(struct stat));
-    if(fstat(flfd, &fst) < 0) {
-	return -1;
-    }
+    rewind(fl);
 
-    buf = malloc(fst.st_size + 1);
+    buf = malloc(size + 1);
 
     if(buf == NULL) {
 	*out = NULL;
 	return 0;
     }
 
-    size_t ret = fread(buf, 1, fst.st_size, fl);
-    if(ret < fst.st_size) {
+    size_t ret = fread(buf, 1, size, fl);
+    if(ret < size) {
 
 	if(feof(fl)) {
-	    fprintf(stderr, "Error: Truncated data while reading '%s': file size %zu bytes, read %zu bytes\n", fileName, fst.st_size, ret);
+	    fprintf(stderr, "Error: Truncated data while reading '%s': file size %zu bytes, read %zu bytes\n", fileName, size, ret);
 	}
 
 	if(ferror(fl)) {
-	    fprintf(stderr, "Error while reading '%s': file size %zu bytes, read %zu bytes\n", fileName, fst.st_size, ret);
+	    fprintf(stderr, "Error while reading '%s': file size %zu bytes, read %zu bytes\n", fileName, size, ret);
 	}
 
 	free(buf);
 	return 0;
 
     }
-    buf[fst.st_size] = EOF;
+    buf[size] = EOF;
 
     fclose(fl);
 
     *out = buf;
 
-    return(fst.st_size + 1);
+    return(size + 1);
 }
 
 /* get the full path of node */
@@ -307,69 +303,18 @@ static inline int printQuoted(FILE* fl, char *src, bool quoted) {
 	    }
 
 	for(char *marker = src; c = *marker, c != '\0'; marker++) {
-
-	    switch(c) {
-#if (defined(BP_ESCHAR1_CODE) && defined(BP_ESCHAR1_VAL))
-		case BP_ESCHAR1_VAL:
-		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_ESCHAR1_CODE);
-		    if(ret < 0) {
-			return -1;
-		    }
-		    break;
-#endif
-#if (defined(BP_ESCHAR2_CODE) && defined(BP_ESCHAR2_VAL))
-		case BP_ESCHAR2_VAL:
-		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_ESCHAR2_CODE);
-		    if(ret < 0) {
-			return -1;
-		    }
-		    break;
-#endif
-#if (defined(BP_ESCHAR3_CODE) && defined(BP_ESCHAR3_VAL))
-		case BP_ESCHAR3_VAL:
-		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_ESCHAR3_CODE);
-		    if(ret < 0) {
-			return -1;
-		    }
-		    break;
-#endif
-#if (defined(BP_ESCHAR4_CODE) && defined(BP_ESCHAR4_VAL))
-		case BP_ESCHAR4_VAL:
-		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_ESCHAR4_CODE);
-		    if(ret < 0) {
-			return -1;
-		    }
-		    break;
-#endif
-#if (defined(BP_ESCHAR5_CODE) && defined(BP_ESCHAR5_VAL))
-		case BP_ESCHAR5_VAL:
-		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_ESCHAR5_CODE);
-		    if(ret < 0) {
-			return -1;
-		    }
-		    break;
-#endif
-		case BP_SGLQUOTE_CHAR:
-		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_SGLQUOTE_CHAR);
-		    if(ret < 0) {
-			return -1;
-		    }
-		    break;
-
-		case BP_DBLQUOTE_CHAR:
-		    ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, BP_DBLQUOTE_CHAR);
-		    if(ret < 0) {
-			return -1;
-		    }
-		    break;
-
-		default:
+	    /* since we we only print with double quotes, do not escape single quotes */
+	    if(cclass(BF_ESC) && c != BP_SGLQUOTE_CHAR) {
+		ret = fprintf(fl, "%c%c", BP_ESCAPE_CHAR, esccodes[c]);
+		if(ret < 0) {
+		    return -1;
+		}
+	    } else {
 		    ret = fprintf(fl, "%c", c);
 		    if(ret < 0) {
 			return -1;
 		    }
-	    };
-
+	    }
 	}
 
 	ret = fprintf(fl, "%c", BP_DBLQUOTE_CHAR);
@@ -385,6 +330,10 @@ static inline int printQuoted(FILE* fl, char *src, bool quoted) {
 
 }
 
+/*
+ * This is so inconceivably fugly it makes me want to take a rusty screwdriver
+ * and stab myself in the neck repeatedly with it. But it will have to do for now.
+ */
 static int
 dumpBarserNode(FILE* fl, BarserNode *node, int level)
 {
@@ -556,8 +505,11 @@ dumpBarserNode(FILE* fl, BarserNode *node, int level)
 
 }
 
+/* dump the whole dictionary */
 void dumpBarserDict(FILE* fl, BarserDict *dict) {
-    dumpBarserNode(fl, dict->root,0);
+
+    dumpBarserNode(fl, dict->root, 0);
+
 }
 
 void
@@ -601,6 +553,7 @@ BarserNode* createBarserNode(BarserDict *dict, BarserNode *parent, const unsigne
     if(parent != NULL) {
 	/* if we are adding an array member, call it by number, ignoring the name */
 	if(parent->type == BP_NODE_ARRAY) {
+	    /* this cunt right here. 30% total performance difference for citylots.json */
 	    snprintf(myName, INT_STRSIZE, "%d", parent->childCount);
 	    ret->name = strdup(myName);
 	} else {
@@ -804,7 +757,6 @@ static inline void barserScan(BarserState *state) {
 		    /* ...and the next character is the inner multiline comment character */
 		    if(barserPeek(state) == BP_MLCOMMENT_IN_CHAR) {
 			/* save state when entering a 'find closing character' type state */
-			printf("mlc %zd\n", state->linepos);
 			savestate(state);
 			c = barserForward(state);
 			state->scanState = BP_SKIP_MLCOMMENT;
@@ -846,47 +798,19 @@ static inline void barserScan(BarserState *state) {
 		if(state->str == NULL) {
 		    goto failure;
 		}
-		bool captured = false;
+		bool captured;
 		while(c != qchar) {
+
 		    if(c == BP_ESCAPE_CHAR) {
 			c = barserForward(state);
-			switch(c) {
-/* BP_ESCHAR[1...5]_CODE + _VAL should be defined in barser_defaults.h */
-#if (defined(BP_ESCHAR1_CODE) && defined(BP_ESCHAR1_VAL))
-			    case BP_ESCHAR1_CODE:
-				state->str[slen] = BP_ESCHAR1_VAL;
-				captured = true;
-				break;
-#endif
-#if (defined(BP_ESCHAR2_CODE) && defined(BP_ESCHAR2_VAL))
-			    case BP_ESCHAR2_CODE:
-				state->str[slen] = BP_ESCHAR2_VAL;
-				captured = true;
-				break;
-#endif
-#if (defined(BP_ESCHAR3_CODE) && defined(BP_ESCHAR3_VAL))
-			    case BP_ESCHAR3_CODE:
-				state->str[slen] = BP_ESCHAR3_VAL;
-				captured = true;
-				break;
-#endif
-#if (defined(BP_ESCHAR4_CODE) && defined(BP_ESCHAR4_VAL))
-			    case BP_ESCHAR4_CODE:
-				state->str[slen] = BP_ESCHAR4_VAL;
-				captured = true;
-				break;
-#endif
-#if (defined(BP_ESCHAR5_CODE) && defined(BP_ESCHAR5_VAL))
-			    case BP_ESCHAR5_CODE:
-				state->str[slen] = BP_ESCHAR5_VAL;
-				captured = true;
-				break;
-#endif
-			    default:
-				captured = false;
-				break;
+			/* this is  an escape sequence */
+			if(cclass(BF_ESS)) {
+			    /* place the corresponding control char */
+			    state->str[slen] = esccodes[c];
+			    captured = true;
 			}
 		    }
+
 		    if(captured) {
 			captured = false;
 		    } else {
@@ -900,7 +824,9 @@ static inline void barserScan(BarserState *state) {
 		    c = barserForward(state);
 		    slen++;
 		    if(slen == ssize) {
+
 			ssize *= 2;
+
 			state->str = realloc(state->str, ssize + 1);
 			if(state->str == NULL) {
 			    goto failure;
@@ -1045,12 +971,11 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 
     PST_DECL(tokenstack, char*, 16);
     PST_DECL(nodestack, BarserNode*, 16);
-    DST_DECL(quotestack, bool, 16);
+    DST_DECL(quotestack, unsigned int, 16);
 
     BarserNode *head;
     BarserNode *newnode;
     BarserState state;
-    int c = 0;
 
     initBarserState(&state, buf, len);
 
@@ -1063,8 +988,6 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
     PST_INIT(tokenstack);
     PST_INIT(nodestack);
     DST_INIT(quotestack);
-
-    c = buf[0];
 
     /* keep parsing until no more data or parser error encountered */
     while(state.parseEvent != BP_GOT_EOF && !state.parseError) {
@@ -1083,7 +1006,7 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 
 		PST_PUSH_GROW(tokenstack, state.str);
 		/* indicate that it's not quoted */
-		DST_PUSH_GROW(quotestack, false);
+		DST_PUSH_GROW(quotestack, 0);
 		state.tokenCount++;
 		break;
 
@@ -1092,7 +1015,7 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 
 		PST_PUSH_GROW(tokenstack, state.str);
 		/* indicate that it's quoted */
-		DST_PUSH_GROW(quotestack, true);
+		DST_PUSH_GROW(quotestack, ~0U);
 		state.tokenCount++;
 		break;
 
@@ -1113,7 +1036,7 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 		    for(int i = 0; i < state.tokenCount; i++) {
 			newnode = createBarserNode(dict, head, BP_NODE_LEAF, "");
 			newnode->value = strdup(tokenstack[i]);
-			newnode->flags |= BP_QUOTED_VALUE * quotestack[i];
+			newnode->flags |= BP_QUOTED_VALUE & quotestack[i];
 		    }
 
 		    /* now enter into an unnamed branch which is a new member of the array */
@@ -1126,25 +1049,25 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 			case 1:
 			    PST_PUSH_GROW(nodestack, head);
 			    newnode = createBarserNode(dict, head, BP_NODE_BRANCH, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[0];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
 			    head = newnode;
 			    break;
 			case 2:
 			    PST_PUSH_GROW(nodestack, head);
 			    newnode = createBarserNode(dict, head, BP_NODE_COLLECTION, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[0];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
 			    newnode = createBarserNode(dict, newnode, BP_NODE_BRANCH, tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[1];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[1];
 			    head = newnode;
 			    break;
 			case 3:
 			    PST_PUSH_GROW(nodestack, head);
 			    newnode = createBarserNode(dict, head, BP_NODE_COLLECTION, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[0];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
 			    newnode = createBarserNode(dict, newnode, BP_NODE_COLLECTION, tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[1];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[1];
 			    newnode = createBarserNode(dict, newnode, BP_NODE_BRANCH, tokenstack[2]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[2];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[2];
 			    head = newnode;
 			    break;
 			/* unnamed branch? only at root level and only once */
@@ -1205,13 +1128,13 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 			case 1:
 			    newnode = createBarserNode(dict, head, BP_NODE_LEAF, "");
 			    newnode->value = strdup(tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_VALUE * quotestack[0];
+			    newnode->flags |= BP_QUOTED_VALUE & quotestack[0];
 			    break;
 			case 2:
 			    newnode = createBarserNode(dict, head, BP_NODE_LEAF, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[0];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
 			    newnode->value = strdup(tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_VALUE * quotestack[1];
+			    newnode->flags |= BP_QUOTED_VALUE & quotestack[1];
 			    break;
 			case 0:
 			    break;
@@ -1227,31 +1150,31 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 
 			case 1:
 			    newnode = createBarserNode(dict, head, BP_NODE_LEAF, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[0];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
 			    break;
 			case 2:
 			    newnode = createBarserNode(dict, head, BP_NODE_LEAF, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[0];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
 			    newnode->value = strdup(tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_VALUE * quotestack[1];
+			    newnode->flags |= BP_QUOTED_VALUE & quotestack[1];
 			    break;
 			case 3:
 			    newnode = createBarserNode(dict, head, BP_NODE_BRANCH, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[0];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
 			    newnode = createBarserNode(dict, newnode, BP_NODE_LEAF, tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[1];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[1];
 			    newnode->value = strdup(tokenstack[2]);
-			    newnode->flags |= BP_QUOTED_VALUE * quotestack[2];
+			    newnode->flags |= BP_QUOTED_VALUE & quotestack[2];
 			    break;
 			case 4:
 			    newnode = createBarserNode(dict, head, BP_NODE_COLLECTION, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[0];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
 			    newnode = createBarserNode(dict, newnode, BP_NODE_BRANCH, tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[1];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[1];
 			    newnode = createBarserNode(dict, newnode, BP_NODE_LEAF, tokenstack[2]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[2];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[2];
 			    newnode->value = strdup(tokenstack[3]);
-			    newnode->flags |= BP_QUOTED_VALUE * quotestack[3];
+			    newnode->flags |= BP_QUOTED_VALUE & quotestack[3];
 			    break;
 			case 0:
 			    break;
@@ -1272,18 +1195,18 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 				* if the number is odd, the last leaf has no value.
 				*/
 				newnode = createBarserNode(dict, head, BP_NODE_BRANCH, tokenstack[0]);
-				newnode->flags |= BP_QUOTED_NAME * quotestack[0];
+				newnode->flags |= BP_QUOTED_NAME & quotestack[0];
 
 				BarserNode *tmphead = newnode;
 
 				for(int i = 1; i < state.tokenCount; i++) {
 
 				    newnode = createBarserNode(dict, tmphead, BP_NODE_LEAF, tokenstack[i]);
-				    newnode->flags |= BP_QUOTED_NAME * quotestack[i];
+				    newnode->flags |= BP_QUOTED_NAME & quotestack[i];
 
 				    if(++i < state.tokenCount) {
 					newnode->value = strdup(tokenstack[i]);
-					newnode->flags |= BP_QUOTED_VALUE * quotestack[i];
+					newnode->flags |= BP_QUOTED_VALUE & quotestack[i];
 				    }
 				}
 
@@ -1317,7 +1240,7 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 		    for(int i = 0; i < state.tokenCount; i++) {
 			newnode = createBarserNode(dict, head, BP_NODE_LEAF, "");
 			newnode->value = strdup(tokenstack[i]);
-			newnode->flags |= BP_QUOTED_VALUE * quotestack[i];
+			newnode->flags |= BP_QUOTED_VALUE & quotestack[i];
 		    }
 
 		    /* now enter into an unnamed array which is a new member of the upper array */
@@ -1331,25 +1254,25 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 			case 1:
 			    PST_PUSH_GROW(nodestack, head);
 			    newnode = createBarserNode(dict, head, BP_NODE_ARRAY, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[0];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
 			    head = newnode;
 			    break;
 			case 2:
 			    PST_PUSH_GROW(nodestack, head);
 			    newnode = createBarserNode(dict, head, BP_NODE_BRANCH, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[0];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
 			    newnode = createBarserNode(dict, newnode, BP_NODE_ARRAY, tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[1];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[1];
 			    head = newnode;
 			    break;
 			case 3:
 			    PST_PUSH_GROW(nodestack, head);
 			    newnode = createBarserNode(dict, head, BP_NODE_COLLECTION, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[0];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
 			    newnode = createBarserNode(dict, newnode, BP_NODE_BRANCH, tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[1];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[1];
 			    newnode = createBarserNode(dict, newnode, BP_NODE_ARRAY, tokenstack[2]);
-			    newnode->flags |= BP_QUOTED_NAME * quotestack[2];
+			    newnode->flags |= BP_QUOTED_NAME & quotestack[2];
 			    head = newnode;
 			    break;
 			/* unnamed aray?  nope. */
@@ -1378,7 +1301,7 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 		    for(int i = 0; i < state.tokenCount; i++) {
 			newnode = createBarserNode(dict, head, BP_NODE_LEAF, "");
 			newnode->value = strdup(tokenstack[i]);
-			newnode->flags |= BP_QUOTED_VALUE * quotestack[i];
+			newnode->flags |= BP_QUOTED_VALUE & quotestack[i];
 		    }
 		/* end of arRAY OUTSIDE AN ARRAY?! What are you, some kind of an animal?! */
 		} else {

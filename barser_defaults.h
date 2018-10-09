@@ -39,43 +39,24 @@
 /* control characters */
 
 /*
- * Up to BP_ENDVAL5_CHAR can be defined here, they are ifdef'd in barser.c.
+ * Up to BP_ENDVAL5_CHAR may be defined here, they are ifdef'd in barser.c.
  * BP_ENDVAL1_CHAR must be defined
  */
-#define BP_ENDVAL1_CHAR		';'		/* end of value, Juniper style */
-#define BP_ENDVAL2_CHAR		','		/* end of value, JSON style*/
+#define BP_ENDVAL1_CHAR         ';'	/* end of value / value separator, Juniper / gated style */
+#define BP_ENDVAL2_CHAR         ','	/* end of value / value separator, JSON style */
 
-#define BP_STARTBLOCK_CHAR	'{'		/* start of block */
-#define BP_ENDBLOCK_CHAR	'}'		/* end of block */
-#define BP_SGLQUOTE_CHAR	'\''		/* double quote character */
-#define BP_DBLQUOTE_CHAR	'"'		/* double quote character */
-#define BP_ESCAPE_CHAR		'\\'		/* escape character */
-#define BP_COMMENT_CHAR		'#'		/* comment marker */
-#define BP_MLCOMMENT_OUT_CHAR	'/'		/* multi-line comment outer character */
-#define BP_MLCOMMENT_IN_CHAR	'*'		/* multi-line comment inner character */
-#define BP_STARTARRAY_CHAR	'['		/* start of array */
-#define BP_ENDARRAY_CHAR	']'		/* end of array */
-#define BP_ARRAYSEP_CHAR	','		/* optional, really used for output only */
-#define BP_INDENT_CHAR		' '		/* indentation */
-
-/*
- * Special escapable characters - 0 to 5 can be defined (none or any from 1...5),
- * in pairs. Only makes sense to list control characters here (in ASCII sense),
- * otherwise any escaped character that is not one of the below, is placed
- * in the string directly, quotes etc, we are clever like that, yo.
- */
-
-#define BP_ESCHAR1_CODE 't'
-#define BP_ESCHAR1_VAL  '\t'
-
-#define BP_ESCHAR2_CODE 'n'
-#define BP_ESCHAR2_VAL  '\n'
-
-#define BP_ESCHAR3_CODE BP_ESCAPE_CHAR /* the '\' itself */
-#define BP_ESCHAR3_VAL  BP_ESCAPE_CHAR
-
-#define BP_ESCHAR4_CODE 'r'
-#define BP_ESCHAR4_VAL  '\r'
+#define BP_STARTBLOCK_CHAR      '{'	/* start of block */
+#define BP_ENDBLOCK_CHAR        '}'	/* end of block */
+#define BP_SGLQUOTE_CHAR        '\''	/* double quote character */
+#define BP_DBLQUOTE_CHAR        '"'	/* double quote character */
+#define BP_ESCAPE_CHAR          '\\'	/* escape character */
+#define BP_COMMENT_CHAR         '#'	/* comment marker */
+#define BP_MLCOMMENT_OUT_CHAR   '/'	/* multi-line comment outer character */
+#define BP_MLCOMMENT_IN_CHAR    '*'	/* multi-line comment inner character */
+#define BP_STARTARRAY_CHAR      '['	/* start of array */
+#define BP_ENDARRAY_CHAR        ']'	/* end of array */
+#define BP_ARRAYSEP_CHAR        ','	/* optional, really used for output only */
+#define BP_INDENT_CHAR          ' '	/* indentation */
 
 /* maximum line length displayed when showing an error */
 #define BP_ERRORDUMP_LINEWIDTH 80
@@ -86,26 +67,34 @@
 /* initial allocation size for a quoted string */
 #define BP_QUOTED_STARTSIZE 100
 
+/* initial allocation size for a token */
+#define BP_TOKEN_STARTSIZE 20
+
 /* maximum number of consecutive tokens when declaring a value - we have to stop somewhere... */
 #define BP_MAX_TOKENS 10
 
 /* character class flags */
 #define BF_NON		0	/* no flags */
-#define BF_TOK		1<<0	/* legal part of a token */
-#define BF_EXT		1<<1	/* extended token characters (used in second and further tokens) */
-#define BF_CTL		1<<2	/* control characters */
-#define BF_SPC		1<<3	/* whitespace characters */
-#define BF_NLN		1<<4	/* newline characters */
-#define BF_ILL		1<<5	/* illegal characters */
+#define BF_TOK		(1<<0)	/* legal part of a token */
+#define BF_EXT		(1<<1)	/* extended token characters (used in second and further tokens) */
+#define BF_CTL		(1<<2)	/* control characters */
+#define BF_SPC		(1<<3)	/* whitespace characters */
+#define BF_NLN		(1<<4)	/* newline characters */
+#define BF_ILL		(1<<5)	/* illegal characters */
+#define BF_ESC		(1<<6)	/* escapable characters */
+#define BF_ESS		(1<<7)	/* escape sequences */
 
 /*
  * Static character to class mappings. a character can belong to multiple classes,
  * so that it can be treated differently depending on scanner state machine state.
  * Example: ':' is both BF_SPC and BF_EXT, so when grabbing a token, ':' can be part
  * of a token. All flags are ORed with BF_NON so extra flags can be added easily.
+ * ...And yes, "do not put static declarations into header files" - but this header
+ * is only meant to be included by barser.h, so, you know.
  */
 
 static const char chflags[256] = {
+
     [  0] = BF_CTL | BF_NON /* NUL */, [ 64] = BF_TOK | BF_NON /* @   */, [128] = BF_ILL | BF_NON, [192] = BF_ILL | BF_NON,
     [  1] = BF_ILL | BF_NON /* SOH */, [ 65] = BF_TOK | BF_NON /* A   */, [129] = BF_ILL | BF_NON, [193] = BF_ILL | BF_NON,
     [  2] = BF_ILL | BF_NON /* STX */, [ 66] = BF_TOK | BF_NON /* B   */, [130] = BF_ILL | BF_NON, [194] = BF_ILL | BF_NON,
@@ -114,12 +103,12 @@ static const char chflags[256] = {
     [  5] = BF_ILL | BF_NON /* ENQ */, [ 69] = BF_TOK | BF_NON /* E   */, [133] = BF_ILL | BF_NON, [197] = BF_ILL | BF_NON,
     [  6] = BF_ILL | BF_NON /* ACK */, [ 70] = BF_TOK | BF_NON /* F   */, [134] = BF_ILL | BF_NON, [198] = BF_ILL | BF_NON,
     [  7] = BF_ILL | BF_NON /* BEL */, [ 71] = BF_TOK | BF_NON /* G   */, [135] = BF_ILL | BF_NON, [199] = BF_ILL | BF_NON,
-    [  8] = BF_ILL | BF_NON /* BS  */, [ 72] = BF_TOK | BF_NON /* H   */, [136] = BF_ILL | BF_NON, [200] = BF_ILL | BF_NON,
-    [  9] = BF_SPC | BF_NON /* TAB */, [ 73] = BF_TOK | BF_NON /* I   */, [137] = BF_ILL | BF_NON, [201] = BF_ILL | BF_NON,
-    [ 10] = BF_NLN | BF_NON /* LF  */, [ 74] = BF_TOK | BF_NON /* J   */, [138] = BF_ILL | BF_NON, [202] = BF_ILL | BF_NON,
+    [  8] = BF_ILL | BF_ESC /* BS  */, [ 72] = BF_TOK | BF_NON /* H   */, [136] = BF_ILL | BF_NON, [200] = BF_ILL | BF_NON,
+    [  9] = BF_SPC | BF_ESC /* TAB */, [ 73] = BF_TOK | BF_NON /* I   */, [137] = BF_ILL | BF_NON, [201] = BF_ILL | BF_NON,
+    [ 10] = BF_NLN | BF_ESC /* LF  */, [ 74] = BF_TOK | BF_NON /* J   */, [138] = BF_ILL | BF_NON, [202] = BF_ILL | BF_NON,
     [ 11] = BF_ILL | BF_NON /* VT  */, [ 75] = BF_TOK | BF_NON /* K   */, [139] = BF_ILL | BF_NON, [203] = BF_ILL | BF_NON,
-    [ 12] = BF_ILL | BF_NON /* FF  */, [ 76] = BF_TOK | BF_NON /* L   */, [140] = BF_ILL | BF_NON, [204] = BF_ILL | BF_NON,
-    [ 13] = BF_NLN | BF_NON /* CR  */, [ 77] = BF_TOK | BF_NON /* M   */, [141] = BF_ILL | BF_NON, [205] = BF_ILL | BF_NON,
+    [ 12] = BF_ILL | BF_ESC /* FF  */, [ 76] = BF_TOK | BF_NON /* L   */, [140] = BF_ILL | BF_NON, [204] = BF_ILL | BF_NON,
+    [ 13] = BF_NLN | BF_ESC /* CR  */, [ 77] = BF_TOK | BF_NON /* M   */, [141] = BF_ILL | BF_NON, [205] = BF_ILL | BF_NON,
     [ 14] = BF_ILL | BF_NON /* SO  */, [ 78] = BF_TOK | BF_NON /* N   */, [142] = BF_ILL | BF_NON, [206] = BF_ILL | BF_NON,
     [ 15] = BF_ILL | BF_NON /* SI  */, [ 79] = BF_TOK | BF_NON /* O   */, [143] = BF_ILL | BF_NON, [207] = BF_ILL | BF_NON,
     [ 16] = BF_ILL | BF_NON /* DLE */, [ 80] = BF_TOK | BF_NON /* P   */, [144] = BF_ILL | BF_NON, [208] = BF_ILL | BF_NON,
@@ -134,31 +123,31 @@ static const char chflags[256] = {
     [ 25] = BF_ILL | BF_NON /* EM  */, [ 89] = BF_TOK | BF_NON /* Y   */, [153] = BF_ILL | BF_NON, [217] = BF_ILL | BF_NON,
     [ 26] = BF_ILL | BF_NON /* SUB */, [ 90] = BF_TOK | BF_NON /* Z   */, [154] = BF_ILL | BF_NON, [218] = BF_ILL | BF_NON,
     [ 27] = BF_ILL | BF_NON /* ESC */, [ 91] = BF_CTL | BF_NON /* [   */, [155] = BF_ILL | BF_NON, [219] = BF_ILL | BF_NON,
-    [ 28] = BF_ILL | BF_NON /* FS  */, [ 92] = BF_CTL | BF_NON /* \   */, [156] = BF_ILL | BF_NON, [220] = BF_ILL | BF_NON,
+    [ 28] = BF_ILL | BF_NON /* FS  */, [ 92] = BF_ESS | BF_ESC /* \   */, [156] = BF_ILL | BF_NON, [220] = BF_ILL | BF_NON,
     [ 29] = BF_ILL | BF_NON /* GS  */, [ 93] = BF_CTL | BF_NON /* ]   */, [157] = BF_ILL | BF_NON, [221] = BF_ILL | BF_NON,
     [ 30] = BF_ILL | BF_NON /* RS  */, [ 94] = BF_TOK | BF_NON /* ^   */, [158] = BF_ILL | BF_NON, [222] = BF_ILL | BF_NON,
     [ 31] = BF_ILL | BF_NON /* US  */, [ 95] = BF_TOK | BF_NON /* _   */, [159] = BF_ILL | BF_NON, [223] = BF_ILL | BF_NON,
     [ 32] = BF_SPC | BF_NON /* SPC */, [ 96] = BF_ILL | BF_NON /* `   */, [160] = BF_ILL | BF_NON, [224] = BF_ILL | BF_NON,
     [ 33] = BF_ILL | BF_NON /* !   */, [ 97] = BF_TOK | BF_NON /* a   */, [161] = BF_ILL | BF_NON, [225] = BF_ILL | BF_NON,
-    [ 34] = BF_CTL | BF_NON /* "   */, [ 98] = BF_TOK | BF_NON /* b   */, [162] = BF_ILL | BF_NON, [226] = BF_ILL | BF_NON,
+    [ 34] = BF_CTL|BF_ESC|BF_ESS/* */, [ 98] = BF_TOK | BF_ESS /* b   */, [162] = BF_ILL | BF_NON, [226] = BF_ILL | BF_NON,
     [ 35] = BF_CTL | BF_NON /* #   */, [ 99] = BF_TOK | BF_NON /* c   */, [163] = BF_ILL | BF_NON, [227] = BF_ILL | BF_NON,
     [ 36] = BF_ILL | BF_NON /* $   */, [100] = BF_TOK | BF_NON /* d   */, [164] = BF_ILL | BF_NON, [228] = BF_ILL | BF_NON,
     [ 37] = BF_ILL | BF_NON /* %   */, [101] = BF_TOK | BF_NON /* e   */, [165] = BF_ILL | BF_NON, [229] = BF_ILL | BF_NON,
-    [ 38] = BF_ILL | BF_NON /* &   */, [102] = BF_TOK | BF_NON /* f   */, [166] = BF_ILL | BF_NON, [230] = BF_ILL | BF_NON,
-    [ 39] = BF_CTL | BF_NON /* '   */, [103] = BF_TOK | BF_NON /* g   */, [167] = BF_ILL | BF_NON, [231] = BF_ILL | BF_NON,
+    [ 38] = BF_ILL | BF_NON /* &   */, [102] = BF_TOK | BF_ESS /* f   */, [166] = BF_ILL | BF_NON, [230] = BF_ILL | BF_NON,
+    [ 39] = BF_CTL|BF_ESC|BF_ESS/*'*/, [103] = BF_TOK | BF_NON /* g   */, [167] = BF_ILL | BF_NON, [231] = BF_ILL | BF_NON,
     [ 40] = BF_ILL | BF_NON /* (   */, [104] = BF_TOK | BF_NON /* h   */, [168] = BF_ILL | BF_NON, [232] = BF_ILL | BF_NON,
     [ 41] = BF_ILL | BF_NON /* )   */, [105] = BF_TOK | BF_NON /* i   */, [169] = BF_ILL | BF_NON, [233] = BF_ILL | BF_NON,
     [ 42] = BF_TOK | BF_NON /* *   */, [106] = BF_TOK | BF_NON /* j   */, [170] = BF_ILL | BF_NON, [234] = BF_ILL | BF_NON,
     [ 43] = BF_ILL | BF_NON /* +   */, [107] = BF_TOK | BF_NON /* k   */, [171] = BF_ILL | BF_NON, [235] = BF_ILL | BF_NON,
     [ 44] = BF_CTL | BF_NON /* ,   */, [108] = BF_TOK | BF_NON /* l   */, [172] = BF_ILL | BF_NON, [236] = BF_ILL | BF_NON,
     [ 45] = BF_TOK | BF_NON /* -   */, [109] = BF_TOK | BF_NON /* m   */, [173] = BF_ILL | BF_NON, [237] = BF_ILL | BF_NON,
-    [ 46] = BF_TOK | BF_NON /* .   */, [110] = BF_TOK | BF_NON /* n   */, [174] = BF_ILL | BF_NON, [238] = BF_ILL | BF_NON,
+    [ 46] = BF_TOK | BF_NON /* .   */, [110] = BF_TOK | BF_ESS /* n   */, [174] = BF_ILL | BF_NON, [238] = BF_ILL | BF_NON,
     [ 47] = BF_TOK | BF_NON /* /   */, [111] = BF_TOK | BF_NON /* o   */, [175] = BF_ILL | BF_NON, [239] = BF_ILL | BF_NON,
     [ 48] = BF_TOK | BF_NON /* 0   */, [112] = BF_TOK | BF_NON /* p   */, [176] = BF_ILL | BF_NON, [240] = BF_ILL | BF_NON,
     [ 49] = BF_TOK | BF_NON /* 1   */, [113] = BF_TOK | BF_NON /* q   */, [177] = BF_ILL | BF_NON, [241] = BF_ILL | BF_NON,
-    [ 50] = BF_TOK | BF_NON /* 2   */, [114] = BF_TOK | BF_NON /* r   */, [178] = BF_ILL | BF_NON, [242] = BF_ILL | BF_NON,
+    [ 50] = BF_TOK | BF_NON /* 2   */, [114] = BF_TOK | BF_ESS /* r   */, [178] = BF_ILL | BF_NON, [242] = BF_ILL | BF_NON,
     [ 51] = BF_TOK | BF_NON /* 3   */, [115] = BF_TOK | BF_NON /* s   */, [179] = BF_ILL | BF_NON, [243] = BF_ILL | BF_NON,
-    [ 52] = BF_TOK | BF_NON /* 4   */, [116] = BF_TOK | BF_NON /* t   */, [180] = BF_ILL | BF_NON, [244] = BF_ILL | BF_NON,
+    [ 52] = BF_TOK | BF_NON /* 4   */, [116] = BF_TOK | BF_ESS /* t   */, [180] = BF_ILL | BF_NON, [244] = BF_ILL | BF_NON,
     [ 53] = BF_TOK | BF_NON /* 5   */, [117] = BF_TOK | BF_NON /* u   */, [181] = BF_ILL | BF_NON, [245] = BF_ILL | BF_NON,
     [ 54] = BF_TOK | BF_NON /* 6   */, [118] = BF_TOK | BF_NON /* v   */, [182] = BF_ILL | BF_NON, [246] = BF_ILL | BF_NON,
     [ 55] = BF_TOK | BF_NON /* 7   */, [119] = BF_TOK | BF_NON /* w   */, [183] = BF_ILL | BF_NON, [247] = BF_ILL | BF_NON,
@@ -170,6 +159,37 @@ static const char chflags[256] = {
     [ 61] = BF_SPC | BF_NON /* =   */, [125] = BF_CTL | BF_NON /* }   */, [189] = BF_ILL | BF_NON, [253] = BF_ILL | BF_NON,
     [ 62] = BF_TOK | BF_NON /* >   */, [126] = BF_TOK | BF_NON /* ~   */, [190] = BF_ILL | BF_NON, [254] = BF_ILL | BF_NON,
     [ 63] = BF_TOK | BF_NON /* ?   */, [127] = BF_ILL | BF_NON /* DEL */, [191] = BF_ILL | BF_NON, [255] = BF_ILL | BF_NON
+
+};
+
+/*
+ * Escape sequence to byte mapping and vice versa. Apart from the quotes and escape character,
+ * this is the minimal escape sequence set specified by JSON, so let's be nice here.
+ * Each of these must carry either BF_ESC or BF_ESS flags above. Otherwise, Alabama Song:
+ *
+ * I tell you we must die, I tell you we must die,
+ * I tell you, I tell you, I tell you we must die.
+ *
+ */
+static const char esccodes[] = {
+
+    /* these... */
+    ['\b'] = 'b', /* BS  */
+    ['\t'] = 't', /* TAB */
+    ['\n'] = 'n', /* LF  */
+    ['\f'] = 'f', /* FF  */
+    ['\r'] = 'r', /* CR  */
+    /* do not collide with these... */
+    ['b'] = '\b', /* BS  */
+    ['t'] = '\t', /* TAB */
+    ['n'] = '\n', /* LF  */
+    ['f'] = '\f', /* FF  */
+    ['r'] = '\r', /* CR  */
+    /* ...or these. Also, see what I did there? */
+    [BP_ESCAPE_CHAR  ] = BP_ESCAPE_CHAR,
+    [BP_SGLQUOTE_CHAR] = BP_SGLQUOTE_CHAR,
+    [BP_DBLQUOTE_CHAR] = BP_DBLQUOTE_CHAR
+
 };
 
 #endif /* BP_DEFAULTS_H_ */
