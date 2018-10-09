@@ -45,6 +45,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <time.h>
+
 #include "barser.h"
 
 /* basic duration measurement macros */
@@ -69,8 +70,6 @@ int main(int argc, char **argv) {
 	return -1;
 
     }
-
-
 
     BarserDict *dict = createBarserDict("test");
 

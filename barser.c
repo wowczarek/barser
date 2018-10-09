@@ -40,11 +40,11 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <sys/types.h>
-
-//#include <unistd.h>
 #include <string.h>
 
 #include "rbt/st_inline.h"
+#include "itoa.h"
+
 #include "barser.h"
 #include "barser_defaults.h"
 
@@ -534,7 +534,8 @@ freeBarserNode(BarserNode *node)
 /* create a new node in @dict, attached to @parent, of type @type with name @name */
 BarserNode* createBarserNode(BarserDict *dict, BarserNode *parent, const unsigned int type, const char* name)
 {
-    tmpstr(myName, INT_STRSIZE);
+    char myName[INT_STRSIZE + 1] = {0};
+
     BarserNode *ret;
 
     if(dict == NULL) {
@@ -553,8 +554,8 @@ BarserNode* createBarserNode(BarserDict *dict, BarserNode *parent, const unsigne
     if(parent != NULL) {
 	/* if we are adding an array member, call it by number, ignoring the name */
 	if(parent->type == BP_NODE_ARRAY) {
-	    /* this cunt right here. 30% total performance difference for citylots.json */
-	    snprintf(myName, INT_STRSIZE, "%d", parent->childCount);
+	    /* major win over snprintf, 30% total performance difference for citylots.json */
+	    u32toa(myName, parent->childCount);
 	    ret->name = strdup(myName);
 	} else {
 	    if(name == NULL) {
