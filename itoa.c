@@ -37,10 +37,10 @@
 
 
 /**
- * @file   int32toa.c
+ * @file   itoa.c
  * @date   Fri Sep 14 23:27:00 2018
  *
- * @brief  A fast int32_t / uint32_t implementation based on work by
+ * @brief  A fast int32_t / uint32_t itoa implementation based on work by
  *         Arturo Martin-de-Nicolas and Google.
  *
  */
@@ -57,12 +57,11 @@ static const char lut100[201] =
 	"8081828384858687888990919293949596979899";
 
 static inline char* put2(unsigned u, char* out) {
-/*    memcpy(out, &((uint16_t*)lut100)[u], 2); */
-    memcpy(out, &lut100[u * 2], 2);
+    memcpy(out, &((uint16_t*)lut100)[u], 2);
     return out + 2;
 }
 
-static inline int digits( uint32_t in, unsigned base, int *digit, char** out, int n ) {
+static inline int onedigit( uint32_t in, unsigned base, int *digit, char** out, int n ) {
 
     if (in < base * 10) {
 	*digit = in / base;
@@ -98,11 +97,11 @@ char* u32toa(char* out, const uint32_t in) {
     int d = 0;
     int n;
 
-	if (in >=100000000)  n = digits(in, 100000000, &d, &out, 10);
-    else if (in <       100) n = digits(in,         1, &d, &out,  2);
-    else if (in <     10000) n = digits(in,       100, &d, &out,  4);
-    else if (in <   1000000) n = digits(in,     10000, &d, &out,  6);
-    else                     n = digits(in,   1000000, &d, &out,  8);
+	if (in >=100000000)  n = onedigit(in, 100000000, &d, &out, 10);
+    else if (in <       100) n = onedigit(in,         1, &d, &out,  2);
+    else if (in <     10000) n = onedigit(in,       100, &d, &out,  4);
+    else if (in <   1000000) n = onedigit(in,     10000, &d, &out,  6);
+    else                     n = onedigit(in,   1000000, &d, &out,  8);
 
     itoa(in, &out, d, n);
 
@@ -110,13 +109,14 @@ char* u32toa(char* out, const uint32_t in) {
 
 }
 
-/*
-    char* itoa(int32_t i, char* p) {
-        uint32_t u = i;
-        if (i < 0) {
-            *p++ = '-';
+char* i32toa(char *out, const int32_t in) {
+
+        uint32_t u = in;
+
+        if (in < 0) {
+            *out++ = '-';
             u = -u;
         }
-        return itoa(u, p);
-    }
-*/
+
+        return u32toa(out, u);
+}

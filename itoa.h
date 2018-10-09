@@ -39,7 +39,7 @@
  * @file   itoa.h
  * @date   Fri Sep 14 23:27:00 2018
  *
- * @brief  A fast int32_t / uint32_t implementation based on work by
+ * @brief  A fast int32_t / uint32_t itoa implementation based on work by
  *         Arturo Martin-de-Nicolas and Google.
  *
  */
@@ -50,5 +50,6 @@
 #include <stdint.h>
 
 char* u32toa(char* out, const uint32_t in);
+char* i32toa(char* out, const int32_t in);
 
 #endif /* ITOA_H_ */

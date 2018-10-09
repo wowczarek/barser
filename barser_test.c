@@ -33,8 +33,7 @@
  *
  */
 
-/* because clock_gettime */
-#define _POSIX_C_SOURCE 199309L
+#define _POSIX_C_SOURCE 199309L /* because clock_gettime */
 #define _XOPEN_SOURCE 500 /* because strdup */
 
 #include <stdio.h>
@@ -55,11 +54,12 @@
 #define DUR_PRINT(name, msg) fprintf(stderr, "%s: %llu ns\n", msg, name##_delta);
 #define DUR_EPRINT(name, msg) DUR_END(name); fprintf(stderr, "%s: %llu ns\n", msg, name##_delta);
 
+#include "itoa.h"
+
 int main(int argc, char **argv) {
 
     DUR_INIT(test);
     char* buf = NULL;
-
     size_t len;
 
     if(argc < 2) {
