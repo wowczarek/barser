@@ -180,8 +180,8 @@ struct BarserNode {
 };
 
 /* node flags */
-#define BP_QUOTED_VALUE	(1<<0)
-#define BP_QUOTED_NAME	(1<<1)
+#define BP_QUOTED_VALUE (1<<0)
+#define BP_QUOTED_NAME  (1<<1)
 
 /* the dictionary */
 struct BarserDict {
