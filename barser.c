@@ -1081,8 +1081,18 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 	    case BP_GOT_QUOTED:
 
 		if(state.tokenCount == BP_MAX_TOKENS) {
-		    state.parseEvent = BP_ERROR;
-		    state.parseError = BP_PERROR_TOKENS;
+		    /* we can have as many tokens as we want in an array, add them in batches */
+		    if(head->type == BP_NODE_ARRAY) {
+			for(int i = 0; i < state.tokenCount; i++) {
+			    newnode = _createBarserNode(dict, head, BP_NODE_LEAF, NULL, 0);
+			    newnode->value = td(i);
+			    newnode->flags |= BP_QUOTED_VALUE & tq(i);
+			}
+			state.tokenCount = 0;
+		    } else{
+			state.parseEvent = BP_ERROR;
+			state.parseError = BP_PERROR_TOKENS;
+		    }
 		} else {
 		    state.tokenCount++;
 		}
