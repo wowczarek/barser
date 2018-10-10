@@ -65,13 +65,10 @@
 #define BP_INDENT_WIDTH 4
 
 /* initial allocation size for a quoted string */
-#define BP_QUOTED_STARTSIZE 100
-
-/* initial allocation size for a token */
-#define BP_TOKEN_STARTSIZE 20
+#define BP_QUOTED_STARTSIZE 50
 
 /* maximum number of consecutive tokens when declaring a value - we have to stop somewhere... */
-#define BP_MAX_TOKENS 10
+#define BP_MAX_TOKENS 20
 
 /* character class flags */
 #define BF_NON		0	/* no flags */
@@ -174,18 +171,23 @@ static const char chflags[256] = {
 static const char esccodes[] = {
 
     /* these... */
+
     ['\b'] = 'b', /* BS  */
     ['\t'] = 't', /* TAB */
     ['\n'] = 'n', /* LF  */
     ['\f'] = 'f', /* FF  */
     ['\r'] = 'r', /* CR  */
+
     /* do not collide with these... */
+
     ['b'] = '\b', /* BS  */
     ['t'] = '\t', /* TAB */
     ['n'] = '\n', /* LF  */
     ['f'] = '\f', /* FF  */
     ['r'] = '\r', /* CR  */
+
     /* ...or these. Also, see what I did there? */
+
     [BP_ESCAPE_CHAR  ] = BP_ESCAPE_CHAR,
     [BP_SGLQUOTE_CHAR] = BP_SGLQUOTE_CHAR,
     [BP_DBLQUOTE_CHAR] = BP_DBLQUOTE_CHAR

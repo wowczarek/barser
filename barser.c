@@ -83,11 +83,20 @@ memset(name, 0, name ## _len);
 		}\
 		fprintf(stderr, "\n");
 
-/* shorthand to clean up the token stack */
+/* shorthand to 'safely' clean up the token cache */
 #define tokencleanup()\
-		DST_FLUSH(quotestack);\
-		PST_FREEDATA(tokenstack);\
+		for(int i = 0; i < BP_MAX_TOKENS; i++) {\
+		    if(state.tokenCache[i].quoted && state.tokenCache[i].data != NULL) {\
+			free(state.tokenCache[i].data);\
+			state.tokenCache[i].data = NULL;\
+		    }\
+		}\
 		state.tokenCount = 0;
+
+/* shorthand to get token data and quoted check */
+#define td(n) getTokenData(&state.tokenCache[n])
+#define tq(n) state.tokenCache[n].quoted
+#define tl(n) state.tokenCache[n].len
 
 /* string scan state machine */
 enum {
@@ -134,11 +143,11 @@ static void initBarserState(BarserState *state, char* buf, const size_t bufsize)
     state->c = buf[0];
     state->end = buf + bufsize;
 
-    state->str = NULL;
-    state->strstart = NULL;
     state->linestart = buf;
 
     state->slinestart = buf;
+
+    memset(&state->tokenCache, 0, BP_MAX_TOKENS * sizeof(BarserToken));
 
     state->linepos = 0;
     state->lineno = 1;
@@ -152,6 +161,41 @@ static void initBarserState(BarserState *state, char* buf, const size_t bufsize)
     state->parseError = BP_PERROR_NONE;
 
     state->tokenCount = 0;
+
+}
+
+/* return a pointer to token data / name, duplicating / copying if necessary */
+static inline char* getTokenData(BarserToken *token) {
+
+    char* out;
+
+    /*
+     * a quoted string is always dynamically allocated to we can take it as is,
+     * we only need to trim it, because they are resized by 2 when parsing,
+     * so get rid of extra memory by cutting it to the required sze only.
+     */
+    if(token->quoted) {
+
+	out = realloc(token->data, token->len + 1);
+	/* this way we know this has been used, so we will not attempt to free it */
+	token->data = NULL;
+
+    /* otherwise token->data is in an existing buffer, so we duplicate */
+    } else {
+
+	out = malloc(token->len + 1);
+	if(out != NULL) {
+	    memcpy(out, token->data, token->len);
+	}
+
+    }
+
+    /* good boy! */
+    if(out != NULL) {
+	out[token->len] = '\0';
+    }
+
+    return out;
 
 }
 
@@ -531,18 +575,24 @@ freeBarserNode(BarserNode *node)
 
 }
 
-/* create a new node in @dict, attached to @parent, of type @type with name @name */
-BarserNode* createBarserNode(BarserDict *dict, BarserNode *parent, const unsigned int type, const char* name)
+/*
+ * Create a node in dict with parent parent of type type using name 'name' of length 'namelen'.
+ * This is the internal version of this function (underscore), which only attaches the name
+ * to the node. If called directly, the name should have been passed throuh getTokenData() first,
+ * so that the name is guaranteed not to come from a buffer that will later be destroyed.
+ *
+ */
+static inline BarserNode* _createBarserNode(BarserDict *dict, BarserNode *parent, const unsigned int type, char* name, const size_t namelen)
 {
-    char myName[INT_STRSIZE + 1] = {0};
 
     BarserNode *ret;
+    size_t slen = 0;
 
     if(dict == NULL) {
 	return NULL;
     }
 
-    ret = calloc(1, sizeof(BarserNode));
+    ret = malloc(sizeof(BarserNode));
 
     if(ret == NULL) {
 	return NULL;
@@ -551,20 +601,38 @@ BarserNode* createBarserNode(BarserDict *dict, BarserNode *parent, const unsigne
     ret->parent = parent;
     ret->type = type;
 
+
+    /* could have calloc'd, but... */
+    ret->flags = 0;
+    ret->value = NULL;
+    ret->childCount = 0;
+    ret->_pathLen = 0;
+    ret->_firstChild = ret->_lastChild = ret->_next = ret->_prev = NULL;
+    ret->_first = NULL;
+
     if(parent != NULL) {
+
 	/* if we are adding an array member, call it by number, ignoring the name */
 	if(parent->type == BP_NODE_ARRAY) {
+	    char numname[INT_STRSIZE + 1];
 	    /* major win over snprintf, 30% total performance difference for citylots.json */
-	    u32toa(myName, parent->childCount);
-	    ret->name = strdup(myName);
+	    char* endname = u32toa(numname, parent->childCount);
+	    slen = endname - numname + 1;
+	    ret->name = malloc(slen);
+	    if(ret->name == NULL) {
+		goto onerror;
+	    }
+	    memcpy(ret->name, numname, slen);
 	} else {
 	    if(name == NULL) {
 		goto onerror;
 	    }
-	    ret->name = strdup(name);
+	    ret->name = name;
+	    /* the extra byte is for a trailing '/', not for NUL */
+	    slen = namelen + 1;
 	}
 
-	ret->_pathLen = parent->_pathLen + strlen(name) + 1;
+	ret->_pathLen = parent->_pathLen + slen;
 
 	LL_APPEND_DYNAMIC(parent, ret);
 	parent->childCount++;
@@ -591,6 +659,21 @@ onerror:
     freeBarserNode(ret);
     return NULL;
 
+}
+/*
+ * Public node creation wrapper.
+ *
+ * Create a new node in @dict, attached to @parent, of type @type with name @name.
+ * If the parent is an array, we do not need a name. If it's not, the name is duplicated
+ * and length is calculated.
+ */
+BarserNode* createBarserNode(BarserDict *dict, BarserNode *parent, const unsigned int type, const char* name) {
+
+    if(parent != NULL && parent->type == BP_NODE_ARRAY) {
+	return _createBarserNode(dict, parent, type, NULL, 0);
+    } else {
+	return _createBarserNode(dict, parent, type, strdup(name), strlen(name));
+    }
 }
 
 unsigned int
@@ -637,7 +720,7 @@ createBarserDict(const char *name) {
     }
     ret->name = strdup(name);
     /* create the root node */
-    createBarserNode(ret, NULL, BP_NODE_ROOT,"");
+    _createBarserNode(ret, NULL, BP_NODE_ROOT,NULL,0);
     return ret;
 }
 
@@ -741,8 +824,8 @@ void printBarserError(BarserState *state) {
 static inline void barserScan(BarserState *state) {
 
     int qchar = BP_DBLQUOTE_CHAR;
-
     int c = *state->current;
+    BarserToken *tok = &state->tokenCache[state->tokenCount];
 
     /* continue scanning until an event occurs */
     do {
@@ -774,17 +857,13 @@ static inline void barserScan(BarserState *state) {
 		break;
 
 	    case BP_GET_TOKEN:
-		state->strstart = state->current;
+		tok->data = state->current;
+		tok->len = 0;
+		tok->quoted = 0;
 		int flags = (state->tokenCount == 0) ? BF_TOK : BF_TOK | BF_EXT;
 		while(cclass(flags)) {
 			c = barserForward(state);
-		}
-		if(state->current > state->strstart) {
-		    state->str = calloc(state->current - state->strstart + 1, 1);
-		    if(state->str == NULL) {
-			goto failure;
-		    }
-		    memcpy(state->str, state->strstart, state->current - state->strstart);
+			tok->len++;
 		}
 		/* raise a "got token" event */
 		state->parseEvent = BP_GOT_TOKEN;
@@ -792,11 +871,11 @@ static inline void barserScan(BarserState *state) {
 		break;
 
 	    case BP_GET_QUOTED: {
-
 		size_t ssize = BP_QUOTED_STARTSIZE;
-		size_t slen = 0;
-		state->str = malloc(ssize + 1);
-		if(state->str == NULL) {
+		tok->len = 0;
+		tok->quoted = ~0;
+		tok->data = malloc(ssize + 1);
+		if(tok->data == NULL) {
 		    goto failure;
 		}
 		bool captured;
@@ -807,7 +886,7 @@ static inline void barserScan(BarserState *state) {
 			/* this is  an escape sequence */
 			if(cclass(BF_ESS)) {
 			    /* place the corresponding control char */
-			    state->str[slen] = esccodes[c];
+			    tok->data[tok->len] = esccodes[c];
 			    captured = true;
 			}
 		    }
@@ -820,22 +899,21 @@ static inline void barserScan(BarserState *state) {
 			    state->parseError = BP_PERROR_EOF;
 			    return;
 			}
-			state->str[slen] = c;
+			tok->data[tok->len] = c;
 		    }
 		    c = barserForward(state);
-		    slen++;
-		    if(slen == ssize) {
-
+		    tok->len++;
+		    if(tok->len == ssize) {
 			ssize *= 2;
-
-			state->str = realloc(state->str, ssize + 1);
-			if(state->str == NULL) {
+			tok->data = realloc(tok->data, ssize + 1);
+			if(tok->data == NULL) {
 			    goto failure;
 			}
 		    }
 		}
 		c = barserForward(state);
-		state->str[slen] = '\0';
+		tok->data[tok->len] = '\0';
+
 		/* raise a "got quoted string" event */
 		state->parseEvent = BP_GOT_QUOTED;
 		state->scanState = BP_SKIP_WHITESPACE;
@@ -970,9 +1048,7 @@ failure:
  */
 BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 
-    PST_DECL(tokenstack, char*, 16);
     PST_DECL(nodestack, BarserNode*, 16);
-    DST_DECL(quotestack, unsigned int, 16);
 
     BarserNode *head;
     BarserNode *newnode;
@@ -986,9 +1062,7 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
     }
 
     head = dict->root;
-    PST_INIT(tokenstack);
     PST_INIT(nodestack);
-    DST_INIT(quotestack);
 
     /* keep parsing until no more data or parser error encountered */
     while(state.parseEvent != BP_GOT_EOF && !state.parseError) {
@@ -1002,22 +1076,16 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 	/* process parser event */
 	switch(state.parseEvent) {
 
-	    /* we got a token - push it onto the stack */
+	    /* we got a token or quoted string - increment counter and check if we can handle the count */
 	    case BP_GOT_TOKEN:
-
-		PST_PUSH_GROW(tokenstack, state.str);
-		/* indicate that it's not quoted */
-		DST_PUSH_GROW(quotestack, 0);
-		state.tokenCount++;
-		break;
-
-	    /* we got a quoted string - push it onto the stack */
 	    case BP_GOT_QUOTED:
 
-		PST_PUSH_GROW(tokenstack, state.str);
-		/* indicate that it's quoted */
-		DST_PUSH_GROW(quotestack, ~0U);
-		state.tokenCount++;
+		if(state.tokenCount == BP_MAX_TOKENS) {
+		    state.parseEvent = BP_ERROR;
+		    state.parseError = BP_PERROR_TOKENS;
+		} else {
+		    state.tokenCount++;
+		}
 		break;
 
 	    /* we got start of a block, i.e. '{' */
@@ -1035,40 +1103,44 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 
 		    /* first insert any existing tokens as array leaves */
 		    for(int i = 0; i < state.tokenCount; i++) {
-			newnode = createBarserNode(dict, head, BP_NODE_LEAF, "");
-			newnode->value = strdup(tokenstack[i]);
-			newnode->flags |= BP_QUOTED_VALUE & quotestack[i];
+			newnode = _createBarserNode(dict, head, BP_NODE_LEAF, NULL, 0);
+			newnode->value = td(i);
+			newnode->flags |= BP_QUOTED_VALUE & tq(i);
 		    }
 
 		    /* now enter into an unnamed branch which is a new member of the array */
 		    PST_PUSH_GROW(nodestack, head); /* save current position */
-		    newnode = createBarserNode(dict, head, BP_NODE_BRANCH, "");
+		    newnode = _createBarserNode(dict, head, BP_NODE_BRANCH, NULL, 0);
 		    head = newnode;
 
 		} else {
 		    switch(state.tokenCount) {
 			case 1:
 			    PST_PUSH_GROW(nodestack, head);
-			    newnode = createBarserNode(dict, head, BP_NODE_BRANCH, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
+			    /*
+			     * the macros td, tq and tl are defined at the top of this file. They simply
+			     * grab the data, quoted field and len field from the given item in token cache.
+			     */
+			    newnode = _createBarserNode(dict, head, BP_NODE_BRANCH, td(0), tl(0));
+			    newnode->flags |= BP_QUOTED_NAME & tq(0);
 			    head = newnode;
 			    break;
 			case 2:
 			    PST_PUSH_GROW(nodestack, head);
-			    newnode = createBarserNode(dict, head, BP_NODE_COLLECTION, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
-			    newnode = createBarserNode(dict, newnode, BP_NODE_BRANCH, tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[1];
+			    newnode = _createBarserNode(dict, head, BP_NODE_COLLECTION, td(0), tl(0));
+			    newnode->flags |= BP_QUOTED_NAME & tq(0);
+			    newnode = _createBarserNode(dict, newnode, BP_NODE_BRANCH, td(1), tl(1));
+			    newnode->flags |= BP_QUOTED_NAME & tq(1);
 			    head = newnode;
 			    break;
 			case 3:
 			    PST_PUSH_GROW(nodestack, head);
-			    newnode = createBarserNode(dict, head, BP_NODE_COLLECTION, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
-			    newnode = createBarserNode(dict, newnode, BP_NODE_COLLECTION, tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[1];
-			    newnode = createBarserNode(dict, newnode, BP_NODE_BRANCH, tokenstack[2]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[2];
+			    newnode = _createBarserNode(dict, head, BP_NODE_COLLECTION, td(0), tl(0));
+			    newnode->flags |= BP_QUOTED_NAME & tq(0);
+			    newnode = _createBarserNode(dict, newnode, BP_NODE_COLLECTION, td(1), tl(1));
+			    newnode->flags |= BP_QUOTED_NAME & tq(1);
+			    newnode = _createBarserNode(dict, newnode, BP_NODE_BRANCH, td(2), tl(2));
+			    newnode->flags |= BP_QUOTED_NAME & tq(2);
 			    head = newnode;
 			    break;
 			/* unnamed branch? only at root level and only once */
@@ -1087,8 +1159,8 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 			    break;
 		    }
 		}
-		/* we don't need the tokens anymore - free the strings, reset the stacks and token count */
-		tokencleanup();
+		/* we don't need the tokens anymore */
+		state.tokenCount = 0;
 		break;
 
 	    /*
@@ -1127,15 +1199,15 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 		    switch(state.tokenCount) {
 
 			case 1:
-			    newnode = createBarserNode(dict, head, BP_NODE_LEAF, "");
-			    newnode->value = strdup(tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_VALUE & quotestack[0];
+			    newnode = _createBarserNode(dict, head, BP_NODE_LEAF, NULL, 0);
+			    newnode->value = td(0);
+			    newnode->flags |= BP_QUOTED_VALUE & tq(0);
 			    break;
+			/* this is only a courtesy thing. array members are always unnamed - we only take the value */
 			case 2:
-			    newnode = createBarserNode(dict, head, BP_NODE_LEAF, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
-			    newnode->value = strdup(tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_VALUE & quotestack[1];
+			    newnode = _createBarserNode(dict, head, BP_NODE_LEAF, NULL, 0);
+			    newnode->value = td(1);
+			    newnode->flags |= BP_QUOTED_VALUE & tq(1);
 			    break;
 			case 0:
 			    break;
@@ -1150,32 +1222,32 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 		    switch(state.tokenCount) {
 
 			case 1:
-			    newnode = createBarserNode(dict, head, BP_NODE_LEAF, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
+			    newnode = _createBarserNode(dict, head, BP_NODE_LEAF, td(0), tl(0));
+			    newnode->flags |= BP_QUOTED_NAME & tq(0);
 			    break;
 			case 2:
-			    newnode = createBarserNode(dict, head, BP_NODE_LEAF, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
-			    newnode->value = strdup(tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_VALUE & quotestack[1];
+			    newnode = _createBarserNode(dict, head, BP_NODE_LEAF, td(0), tl(0));
+			    newnode->flags |= BP_QUOTED_NAME & tq(0);
+			    newnode->value = td(1);
+			    newnode->flags |= BP_QUOTED_VALUE & tq(1);
 			    break;
 			case 3:
-			    newnode = createBarserNode(dict, head, BP_NODE_BRANCH, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
-			    newnode = createBarserNode(dict, newnode, BP_NODE_LEAF, tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[1];
-			    newnode->value = strdup(tokenstack[2]);
-			    newnode->flags |= BP_QUOTED_VALUE & quotestack[2];
+			    newnode = _createBarserNode(dict, head, BP_NODE_BRANCH, td(0), tl(0));
+			    newnode->flags |= BP_QUOTED_NAME & tq(0);
+			    newnode = _createBarserNode(dict, newnode, BP_NODE_LEAF, td(1), tl(1));
+			    newnode->flags |= BP_QUOTED_NAME & tq(1);
+			    newnode->value = td(2);
+			    newnode->flags |= BP_QUOTED_VALUE & tq(2);
 			    break;
 			case 4:
-			    newnode = createBarserNode(dict, head, BP_NODE_COLLECTION, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
-			    newnode = createBarserNode(dict, newnode, BP_NODE_BRANCH, tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[1];
-			    newnode = createBarserNode(dict, newnode, BP_NODE_LEAF, tokenstack[2]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[2];
-			    newnode->value = strdup(tokenstack[3]);
-			    newnode->flags |= BP_QUOTED_VALUE & quotestack[3];
+			    newnode = _createBarserNode(dict, head, BP_NODE_COLLECTION, td(0), tl(0));
+			    newnode->flags |= BP_QUOTED_NAME & tq(0);
+			    newnode = _createBarserNode(dict, newnode, BP_NODE_BRANCH, td(1), tl(1));
+			    newnode->flags |= BP_QUOTED_NAME & tq(1);
+			    newnode = _createBarserNode(dict, newnode, BP_NODE_LEAF, td(2), tl(2));
+			    newnode->flags |= BP_QUOTED_NAME & tq(2);
+			    newnode->value = td(3);
+			    newnode->flags |= BP_QUOTED_VALUE & tq(3);
 			    break;
 			case 0:
 			    break;
@@ -1195,19 +1267,19 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 				* 5+ consecutive tokens we treat as branch with (n-1) / 2 leaf-value pairs,
 				* if the number is odd, the last leaf has no value.
 				*/
-				newnode = createBarserNode(dict, head, BP_NODE_BRANCH, tokenstack[0]);
-				newnode->flags |= BP_QUOTED_NAME & quotestack[0];
+				newnode = _createBarserNode(dict, head, BP_NODE_BRANCH, td(0), tl(0));
+				newnode->flags |= BP_QUOTED_NAME & tq(0);
 
 				BarserNode *tmphead = newnode;
 
 				for(int i = 1; i < state.tokenCount; i++) {
 
-				    newnode = createBarserNode(dict, tmphead, BP_NODE_LEAF, tokenstack[i]);
-				    newnode->flags |= BP_QUOTED_NAME & quotestack[i];
+				    newnode = _createBarserNode(dict, tmphead, BP_NODE_LEAF, td(i), tl(i));
+				    newnode->flags |= BP_QUOTED_NAME & tq(i);
 
 				    if(++i < state.tokenCount) {
-					newnode->value = strdup(tokenstack[i]);
-					newnode->flags |= BP_QUOTED_VALUE & quotestack[i];
+					newnode->value = td(i);
+					newnode->flags |= BP_QUOTED_VALUE & tq(i);
 				    }
 				}
 
@@ -1228,7 +1300,7 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 		    head = PST_POP(nodestack);
 		}
 
-		tokencleanup();
+		state.tokenCount = 0;
 		break;
 
 	    /* array start block i.e. '[' */
@@ -1239,14 +1311,14 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 
 		    /* first insert any existing tokens as array leaves */
 		    for(int i = 0; i < state.tokenCount; i++) {
-			newnode = createBarserNode(dict, head, BP_NODE_LEAF, "");
-			newnode->value = strdup(tokenstack[i]);
-			newnode->flags |= BP_QUOTED_VALUE & quotestack[i];
+			newnode = _createBarserNode(dict, head, BP_NODE_LEAF, NULL, 0);
+			newnode->value = td(i);
+			newnode->flags |= BP_QUOTED_VALUE & tq(i);
 		    }
 
 		    /* now enter into an unnamed array which is a new member of the upper array */
 		    PST_PUSH_GROW(nodestack, head); /* save current position */
-		    newnode = createBarserNode(dict, head, BP_NODE_ARRAY, "");
+		    newnode = _createBarserNode(dict, head, BP_NODE_ARRAY, NULL,0);
 		    head = newnode;
 
 		} else {
@@ -1254,26 +1326,26 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 		    switch(state.tokenCount) {
 			case 1:
 			    PST_PUSH_GROW(nodestack, head);
-			    newnode = createBarserNode(dict, head, BP_NODE_ARRAY, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
+			    newnode = _createBarserNode(dict, head, BP_NODE_ARRAY, td(0), tl(0));
+			    newnode->flags |= BP_QUOTED_NAME & tq(0);
 			    head = newnode;
 			    break;
 			case 2:
 			    PST_PUSH_GROW(nodestack, head);
-			    newnode = createBarserNode(dict, head, BP_NODE_BRANCH, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
-			    newnode = createBarserNode(dict, newnode, BP_NODE_ARRAY, tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[1];
+			    newnode = _createBarserNode(dict, head, BP_NODE_BRANCH, td(0), tl(0));
+			    newnode->flags |= BP_QUOTED_NAME & tq(0);
+			    newnode = _createBarserNode(dict, newnode, BP_NODE_ARRAY, td(1), tl(1));
+			    newnode->flags |= BP_QUOTED_NAME & tq(1);
 			    head = newnode;
 			    break;
 			case 3:
 			    PST_PUSH_GROW(nodestack, head);
-			    newnode = createBarserNode(dict, head, BP_NODE_COLLECTION, tokenstack[0]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[0];
-			    newnode = createBarserNode(dict, newnode, BP_NODE_BRANCH, tokenstack[1]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[1];
-			    newnode = createBarserNode(dict, newnode, BP_NODE_ARRAY, tokenstack[2]);
-			    newnode->flags |= BP_QUOTED_NAME & quotestack[2];
+			    newnode = _createBarserNode(dict, head, BP_NODE_COLLECTION, td(0), tl(0));
+			    newnode->flags |= BP_QUOTED_NAME & tq(0);
+			    newnode = _createBarserNode(dict, newnode, BP_NODE_BRANCH, td(1), tl(1));
+			    newnode->flags |= BP_QUOTED_NAME & tq(1);
+			    newnode = _createBarserNode(dict, newnode, BP_NODE_ARRAY, td(2), tl(2));
+			    newnode->flags |= BP_QUOTED_NAME & tq(2);
 			    head = newnode;
 			    break;
 			/* unnamed aray?  nope. */
@@ -1287,7 +1359,8 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 
 		}
 
-		tokencleanup();
+		state.tokenCount = 0;
+
 		break;
 
 	    /* array end block i.e. ']' */
@@ -1300,9 +1373,9 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 		    * as a list of whitespace-separated tokens.
 		    */
 		    for(int i = 0; i < state.tokenCount; i++) {
-			newnode = createBarserNode(dict, head, BP_NODE_LEAF, "");
-			newnode->value = strdup(tokenstack[i]);
-			newnode->flags |= BP_QUOTED_VALUE & quotestack[i];
+			newnode = _createBarserNode(dict, head, BP_NODE_LEAF, NULL, 0);
+			newnode->value = td(i);
+			newnode->flags |= BP_QUOTED_VALUE & tq(i);
 		    }
 		/* end of arRAY OUTSIDE AN ARRAY?! What are you, some kind of an animal?! */
 		} else {
@@ -1319,7 +1392,8 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 		/* return to last branching point */
 		head = PST_POP(nodestack);
 
-		tokencleanup();
+		state.tokenCount = 0;
+
 		break;
 
 	    case BP_GOT_EOF:
@@ -1336,10 +1410,8 @@ BarserState barseBuffer(BarserDict *dict, char *buf, const size_t len) {
 	state.parseError = BP_PERROR_LEVEL;
     }
 
-    PST_FREEDATA(tokenstack);
-    PST_FREE(tokenstack);
+    tokencleanup();
     PST_FREE(nodestack);
-    DST_FREE(quotestack);
 
     return state;
 

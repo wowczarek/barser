@@ -34,7 +34,6 @@
  */
 
 #define _POSIX_C_SOURCE 199309L /* because clock_gettime */
-#define _XOPEN_SOURCE 500 /* because strdup */
 
 #include <stdio.h>
 #include <stdint.h>

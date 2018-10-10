@@ -39,6 +39,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include "linked_list.h"
+#include "barser_defaults.h"
 
 /* BarserNode / BarserDict is a simple hierarchical data parser,
  * with a tree structure and path-based retrieval (/parent/child/grandchild)
@@ -127,6 +128,12 @@ enum {
 /* shorthand macro to check if (int!) c is a character of class cl (above) */
 #define chclass(c, cl) (chflags[c] & (cl))
 
+typedef struct {
+    char* data;
+    size_t len;
+    unsigned int quoted;
+} BarserToken;
+
 /* parser state container */
 typedef struct {
 
@@ -136,11 +143,10 @@ typedef struct {
     int c;			/* current character */
     char *end;			/* buffer end marker */
 
-    char *str;			/* last token grabbed */
-    char *strstart;		/* start position of last string token */
     char *linestart;		/* start position of current line */
-
     char *slinestart;		/* start position of line when entered state */
+
+    BarserToken tokenCache[BP_MAX_TOKENS]; /* token cache */
 
     size_t linepos;		/* position in line */
     size_t lineno;		/* line number */

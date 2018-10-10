@@ -1,12 +1,12 @@
 /* BSD 3-Clause License
  *
  * Copyright (c) 2008 Google Inc.
-*                Protocol Buffers - Google's data interchange format
+ *               Protocol Buffers - Google's data interchange format
  *               https://developers.google.com/protocol-buffers/
  * Copyright (c) 2016 Arturo Martin-de-Nicolas
  *               https://github.com/amdn/itoa_ljust/
  * Copyright (c) 2018 Wojciech Owczarek
- *
+ *               https://github.com/wowczarek/barser/
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -49,66 +49,66 @@
 #include <string.h>
 #include "itoa.h"
 
-static const char lut100[201] =
-	"0001020304050607080910111213141516171819"
-	"2021222324252627282930313233343536373839"
-	"4041424344454647484950515253545556575859"
-	"6061626364656667686970717273747576777879"
-	"8081828384858687888990919293949596979899";
+/* Letters Unnecessary Table */
+static const char lut100[100][2] = {
+    "00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
+    "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+    "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59",
+    "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79",
+    "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95", "96", "97", "98", "99"
+};
 
+/* put '00' .. '99' into buffer...  */
 static inline char* put2(unsigned u, char* out) {
-    memcpy(out, &((uint16_t*)lut100)[u], 2);
+    memcpy(out, &lut100[u][0], 2);
     return out + 2;
 }
 
-static inline int onedigit( uint32_t in, unsigned base, int *digit, char** out, int n ) {
+/* convert an even-digit integer sequence to string in two-digit groups */
+static inline void _itoa(uint32_t u, char **p, int d, int n) {
 
-    if (in < base * 10) {
-	*digit = in / base;
-	*(*out)++ = '0' + *digit;
-	--n;
-    }
-
-    return n;
-}
-
-static inline void itoa(uint32_t u, char **p, int d, int n) {
     switch(n) {
-	case 10: d  = u / 100000000; *p = put2(d, *p);
+
+	case 10: d  = u / 100000000; *p = put2(d, *p);;
 	case  9: u -= d * 100000000;
-	case  8: d  = u /   1000000; *p = put2(d, *p);
+	case  8: d  = u /   1000000; *p = put2(d, *p);;
 	case  7: u -= d *   1000000;
-	case  6: d  = u /     10000; *p = put2(d, *p);
+	case  6: d  = u /     10000; *p = put2(d, *p);;
 	case  5: u -= d *     10000;
-	case  4: d  = u /       100; *p = put2(d, *p);
+	case  4: d  = u /       100; *p = put2(d, *p);;
 	case  3: u -= d *       100;
-	case  2: d  = u /         1; *p = put2(d, *p);
+	case  2: d  = u /         1; *p = put2(d, *p);;
 	case  1: ;
+
     }
 
+    /* a null-terminated string is a happy string */
     *(*p) = '\0';
 
 }
 
 
+/* unsigned version */
 char* u32toa(char* out, const uint32_t in) {
 
-    char* start = out;
     int d = 0;
     int n;
 
-	if (in >=100000000)  n = onedigit(in, 100000000, &d, &out, 10);
-    else if (in <       100) n = onedigit(in,         1, &d, &out,  2);
-    else if (in <     10000) n = onedigit(in,       100, &d, &out,  4);
-    else if (in <   1000000) n = onedigit(in,     10000, &d, &out,  6);
-    else                     n = onedigit(in,   1000000, &d, &out,  8);
+    /* handle first digit if odd number of digits and establish number of digits */
+	 if (in >= 100000000) n = (in < 1000000000) ? d = in / 100000000, *out++ = '0' + d, 9 : 10;
+    else if (in <        100) n = (in < 10)         ? d = in            , *out++ = '0' + d, 1 : 2;
+    else if (in <      10000) n = (in < 1000)       ? d = in / 100      , *out++ = '0' + d, 3 : 4;
+    else if (in <    1000000) n = (in < 100000)     ? d = in / 10000    , *out++ = '0' + d, 5 : 6;
+    else                      n = (in < 10000000)   ? d = in / 1000000  , *out++ = '0' + d, 7 : 8;
 
-    itoa(in, &out, d, n);
+    /* handle remaining digits */
+    _itoa(in, &out, d, n);
 
-    return start;
+    return out;
 
 }
 
+/* signed version - just put a minus in front if negative, handle rest as normal */
 char* i32toa(char *out, const int32_t in) {
 
         uint32_t u = in;
