@@ -69,15 +69,15 @@ static inline void _itoa(uint32_t u, char **p, int d, int n) {
 
     switch(n) {
 
-	case 10: d  = u / 100000000; *p = put2(d, *p);;
+	case 10: d  = u / 100000000; *p = put2(d, *p);
 	case  9: u -= d * 100000000;
-	case  8: d  = u /   1000000; *p = put2(d, *p);;
+	case  8: d  = u /   1000000; *p = put2(d, *p);
 	case  7: u -= d *   1000000;
-	case  6: d  = u /     10000; *p = put2(d, *p);;
+	case  6: d  = u /     10000; *p = put2(d, *p);
 	case  5: u -= d *     10000;
-	case  4: d  = u /       100; *p = put2(d, *p);;
+	case  4: d  = u /       100; *p = put2(d, *p);
 	case  3: u -= d *       100;
-	case  2: d  = u /         1; *p = put2(d, *p);;
+	case  2: d  = u /         1; *p = put2(d, *p);
 	case  1: ;
 
     }
@@ -95,7 +95,7 @@ char* u32toa(char* out, const uint32_t in) {
     int n;
 
     /* handle first digit if odd number of digits and establish number of digits */
-	 if (in >= 100000000) n = (in < 1000000000) ? d = in / 100000000, *out++ = '0' + d, 9 : 10;
+         if (in >= 100000000) n = (in < 1000000000) ? d = in / 100000000, *out++ = '0' + d, 9 : 10;
     else if (in <        100) n = (in < 10)         ? d = in            , *out++ = '0' + d, 1 : 2;
     else if (in <      10000) n = (in < 1000)       ? d = in / 100      , *out++ = '0' + d, 3 : 4;
     else if (in <    1000000) n = (in < 100000)     ? d = in / 10000    , *out++ = '0' + d, 5 : 6;
@@ -104,6 +104,7 @@ char* u32toa(char* out, const uint32_t in) {
     /* handle remaining digits */
     _itoa(in, &out, d, n);
 
+    /* return the NULL-termination spot. this allows us to progress in a buffer */
     return out;
 
 }

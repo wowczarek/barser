@@ -36,6 +36,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 #include "xxh.h"
 
 /* magic primes */
@@ -45,10 +46,7 @@
 #define XXH32_P4	0x27d4eb2f
 #define XXH32_P5	0x165667b1
 
-/* rotate left. any decent compiler should turn this into rol (or ror on little-endians) */
-#define rol32(var, pos) (((var) << pos) | ((var) >> (32 - pos)))
-
-uint32_t xxHash(const void* in, const size_t len) {
+uint32_t xxHash32(const void* in, const size_t len) {
 
     const unsigned char* marker = (const unsigned char*) in;
     const unsigned char* end = marker + len;
@@ -60,10 +58,12 @@ uint32_t xxHash(const void* in, const size_t len) {
 	uint32_t acc[4] = { XXH32_P1 + XXH32_P2, XXH32_P2, 0, -XXH32_P1 };
 
 	do {
+
 	    acc[0] += *(uint32_t*)marker * XXH32_P2; acc[0] = rol32(acc[0], 13); acc[0] *= XXH32_P1; marker += 4;
 	    acc[1] += *(uint32_t*)marker * XXH32_P2; acc[1] = rol32(acc[1], 13); acc[1] *= XXH32_P1; marker += 4;
 	    acc[2] += *(uint32_t*)marker * XXH32_P2; acc[2] = rol32(acc[2], 13); acc[2] *= XXH32_P1; marker += 4;
 	    acc[3] += *(uint32_t*)marker * XXH32_P2; acc[3] = rol32(acc[3], 13); acc[3] *= XXH32_P1; marker += 4;
+
 	} while (marker <= lim);
 
 	hash = rol32(acc[0], 1) + rol32(acc[1], 7) + rol32(acc[2], 12) + rol32(acc[3], 18);
@@ -76,20 +76,16 @@ uint32_t xxHash(const void* in, const size_t len) {
 
     hash += (uint32_t) len;
 
-    while(marker < end - 4) {
-
+    while(marker < end - 4 ) {
 	hash += *(uint32_t*)marker * XXH32_P3;
 	hash = rol32(hash, 17) * XXH32_P4;
 	marker += 4;
-
     }
 
-    while(marker <= end) {
-
+    while(marker < end) {
 	hash += *marker * XXH32_P5;
 	hash = rol32(hash, 11) * XXH32_P1;
 	marker++;
-
     }
 
     hash ^= hash >> 15;

@@ -38,37 +38,41 @@
 
 /* control characters */
 
-/*
- * Up to BP_ENDVAL5_CHAR may be defined here, they are ifdef'd in barser.c.
- * BP_ENDVAL1_CHAR must be defined
- */
-#define BP_ENDVAL1_CHAR         ';'	/* end of value / value separator, Juniper / gated style */
-#define BP_ENDVAL2_CHAR         ','	/* end of value / value separator, JSON style */
 
-#define BP_STARTBLOCK_CHAR      '{'	/* start of block */
-#define BP_ENDBLOCK_CHAR        '}'	/* end of block */
-#define BP_SGLQUOTE_CHAR        '\''	/* double quote character */
-#define BP_DBLQUOTE_CHAR        '"'	/* double quote character */
-#define BP_ESCAPE_CHAR          '\\'	/* escape character */
-#define BP_COMMENT_CHAR         '#'	/* comment marker */
-#define BP_MLCOMMENT_OUT_CHAR   '/'	/* multi-line comment outer character */
-#define BP_MLCOMMENT_IN_CHAR    '*'	/* multi-line comment inner character */
-#define BP_STARTARRAY_CHAR      '['	/* start of array */
-#define BP_ENDARRAY_CHAR        ']'	/* end of array */
-#define BP_ARRAYSEP_CHAR        ','	/* optional, really used for output only */
-#define BP_INDENT_CHAR          ' '	/* indentation */
+/* BS_ENDVAL_CHAR must be defined - this is the default value separator */
+#define BS_ENDVAL_CHAR          ';'	/* end of value / value separator, Juniper / gated style */
+/* BS_ENDVAL1_CHAR up to BS_ENDVAL5_CHAR may optionally be defined */
+#define BS_ENDVAL1_CHAR         ','	/* end of value / value separator, JSON style */
 
-/* maximum line length displayed when showing an error */
-#define BP_ERRORDUMP_LINEWIDTH 80
+/* BS_QUOTE_CHAR must be defined */
+#define BS_QUOTE_CHAR        '"'	/* double quote character */
+/* BS_QUOTE1_CHAR up to BS_QUOTE3_CHAR may be defined */
+#define BS_QUOTE1_CHAR        '\''	/* single quote character */
+
+#define BS_STARTBLOCK_CHAR      '{'	/* start of block */
+#define BS_ENDBLOCK_CHAR        '}'	/* end of block */
+#define BS_ESCAPE_CHAR          '\\'	/* escape character */
+#define BS_COMMENT_CHAR         '#'	/* comment marker */
+#define BS_MLCOMMENT_OUT_CHAR   '/'	/* multi-line comment outer character */
+#define BS_MLCOMMENT_IN_CHAR    '*'	/* multi-line comment inner character */
+#define BS_STARTARRAY_CHAR      '['	/* start of array */
+#define BS_ENDARRAY_CHAR        ']'	/* end of array */
+#define BS_ARRAYSEP_CHAR        ','	/* optional, really used for output only */
+#define BS_INDENT_CHAR          ' '	/* indentation */
+
+#define BS_PATH_SEP		'/'	/* path separator for queries */
+
+/* maximum line width displayed when showing an error */
+#define BS_ERRORDUMP_LINEWIDTH 80
 
 /* indent size - if space is chosen, can be say 4 or 8 */
-#define BP_INDENT_WIDTH 4
+#define BS_INDENT_WIDTH 4
 
 /* initial allocation size for a quoted string */
-#define BP_QUOTED_STARTSIZE 50
+#define BS_QUOTED_STARTSIZE 50
 
 /* maximum number of consecutive tokens when declaring a value - we have to stop somewhere... */
-#define BP_MAX_TOKENS 20
+#define BS_MAX_TOKENS 20
 
 /* character class flags */
 #define BF_NON		0	/* no flags */
@@ -119,9 +123,9 @@ static const char chflags[256] = {
     [ 24] = BF_ILL | BF_NON /* CAN */, [ 88] = BF_TOK | BF_NON /* X   */, [152] = BF_ILL | BF_NON, [216] = BF_ILL | BF_NON,
     [ 25] = BF_ILL | BF_NON /* EM  */, [ 89] = BF_TOK | BF_NON /* Y   */, [153] = BF_ILL | BF_NON, [217] = BF_ILL | BF_NON,
     [ 26] = BF_ILL | BF_NON /* SUB */, [ 90] = BF_TOK | BF_NON /* Z   */, [154] = BF_ILL | BF_NON, [218] = BF_ILL | BF_NON,
-    [ 27] = BF_ILL | BF_NON /* ESC */, [ 91] = BF_CTL | BF_NON /* [   */, [155] = BF_ILL | BF_NON, [219] = BF_ILL | BF_NON,
+    [ 27] = BF_ILL | BF_NON /* ESC */, [ 91] =BF_CTL|BF_ESC|BF_ESS/*[ */, [155] = BF_ILL | BF_NON, [219] = BF_ILL | BF_NON,
     [ 28] = BF_ILL | BF_NON /* FS  */, [ 92] = BF_ESS | BF_ESC /* \   */, [156] = BF_ILL | BF_NON, [220] = BF_ILL | BF_NON,
-    [ 29] = BF_ILL | BF_NON /* GS  */, [ 93] = BF_CTL | BF_NON /* ]   */, [157] = BF_ILL | BF_NON, [221] = BF_ILL | BF_NON,
+    [ 29] = BF_ILL | BF_NON /* GS  */, [ 93] =BF_CTL|BF_ESC|BF_ESS/*] */, [157] = BF_ILL | BF_NON, [221] = BF_ILL | BF_NON,
     [ 30] = BF_ILL | BF_NON /* RS  */, [ 94] = BF_TOK | BF_NON /* ^   */, [158] = BF_ILL | BF_NON, [222] = BF_ILL | BF_NON,
     [ 31] = BF_ILL | BF_NON /* US  */, [ 95] = BF_TOK | BF_NON /* _   */, [159] = BF_ILL | BF_NON, [223] = BF_ILL | BF_NON,
     [ 32] = BF_SPC | BF_NON /* SPC */, [ 96] = BF_ILL | BF_NON /* `   */, [160] = BF_ILL | BF_NON, [224] = BF_ILL | BF_NON,
@@ -135,7 +139,7 @@ static const char chflags[256] = {
     [ 40] = BF_ILL | BF_NON /* (   */, [104] = BF_TOK | BF_NON /* h   */, [168] = BF_ILL | BF_NON, [232] = BF_ILL | BF_NON,
     [ 41] = BF_ILL | BF_NON /* )   */, [105] = BF_TOK | BF_NON /* i   */, [169] = BF_ILL | BF_NON, [233] = BF_ILL | BF_NON,
     [ 42] = BF_TOK | BF_NON /* *   */, [106] = BF_TOK | BF_NON /* j   */, [170] = BF_ILL | BF_NON, [234] = BF_ILL | BF_NON,
-    [ 43] = BF_ILL | BF_NON /* +   */, [107] = BF_TOK | BF_NON /* k   */, [171] = BF_ILL | BF_NON, [235] = BF_ILL | BF_NON,
+    [ 43] = BF_TOK | BF_NON /* +   */, [107] = BF_TOK | BF_NON /* k   */, [171] = BF_ILL | BF_NON, [235] = BF_ILL | BF_NON,
     [ 44] = BF_CTL | BF_NON /* ,   */, [108] = BF_TOK | BF_NON /* l   */, [172] = BF_ILL | BF_NON, [236] = BF_ILL | BF_NON,
     [ 45] = BF_TOK | BF_NON /* -   */, [109] = BF_TOK | BF_NON /* m   */, [173] = BF_ILL | BF_NON, [237] = BF_ILL | BF_NON,
     [ 46] = BF_TOK | BF_NON /* .   */, [110] = BF_TOK | BF_ESS /* n   */, [174] = BF_ILL | BF_NON, [238] = BF_ILL | BF_NON,
@@ -188,10 +192,21 @@ static const char esccodes[] = {
 
     /* ...or these. Also, see what I did there? */
 
-    [BP_ESCAPE_CHAR  ] = BP_ESCAPE_CHAR,
-    [BP_SGLQUOTE_CHAR] = BP_SGLQUOTE_CHAR,
-    [BP_DBLQUOTE_CHAR] = BP_DBLQUOTE_CHAR
+    [BS_ESCAPE_CHAR  ] = BS_ESCAPE_CHAR,
+    [BS_QUOTE_CHAR] = BS_QUOTE_CHAR,
+#ifdef BS_QUOTE1_CHAR
+    [BS_QUOTE1_CHAR] = BS_QUOTE1_CHAR,
+#endif
+#ifdef BS_QUOTE2_CHAR
+    [BS_QUOTE2_CHAR] = BS_QUOTE2_CHAR,
+#endif
+#ifdef BS_QUOTE3_CHAR
+    [BS_QUOTE3_CHAR] = BS_QUOTE3_CHAR,
+#endif
 
+    /* Juniper does this... */
+    ['['] = '[',
+    [']'] = ']',
 };
 
-#endif /* BP_DEFAULTS_H_ */
+#endif /* BARSER_DEFAULTS_H_ */

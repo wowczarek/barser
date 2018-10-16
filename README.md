@@ -2,7 +2,7 @@
 
 ## About
 
-Barser is a general-purpose flexible hierarchical configurational parser / dictionary with a tree structure.
+Barser is a general-purpose flexible hierarchical configurational parser / dictionary with a tree structure. It is built for features and convenience first, and for speed second.
 
 Although Barser will parse JSON files, it is not a JSON parser. An alternative parse function could be written to deal with JSON specifically - and it would be much faster because it would not have to deal with special cases, namely multiple consecutive tokens. Barser will parse JSON and many other variants of curly bracket syntax, but the native format it can work with is similar to Juniper Networks' JunOS configuration files (or actually gated if you still remember it).
 
@@ -20,9 +20,14 @@ Barser is work in progress. At this time (8 Oct 2018) Barser passes feedback tes
 
 ### Plans:
 
-- Implement indexing of inserted tree nodes using a red-black tree index
-- Implement a simple query language (direct queries in the form of "/node/child/grandchild" will be supported as soon as indexing is implemented
-- Implement variable support / string replacement and automatic content generation
+- Implement a good node hashing strategy **[done]**. Using xxhash of node name, XOR-mixed with parent's hash. Mixing works reasonably well - total of 22k collisions for citylots.js at 13M nodes, max nodes per hash 2.
+- Implement indexing of inserted tree nodes using a red-black tree index initially **[done]**
+- Implement dynamic linked lists to deal with collisions (this is beyond the index and any collision resolving strategy - fast, non-crypto hashes WILL collide)
+- Implement a simple query format (direct queries in the form of "/node/child/grandchild" will be supported as soon as indexing is implemented **[direct queries done]** - target is to support "*" and "?"
+- Implement variable support / string replacement (`@variables { bob "square";} shapes { box "@bob@"; }`) and automatic content generation ( `@generate "seq var 1 1000" "test@var@" { hello 5; this "number@var@";}`)
+- Implement node renaming (and rehashing)
+- Implement dictionary copying / duplication
+- Implement callback walks / iteration
 - Implement merge and diff operations
 - Implement stage 2 parsing of stored string values to other data types
 - Investigate wide character support
@@ -31,7 +36,6 @@ Barser is work in progress. At this time (8 Oct 2018) Barser passes feedback tes
 ### Supported data format
 
 For the lack of a proper reference / standard, here is some loose information about the input format.
-
 
 Barser was developed around the concepts used in gated / JunOS config files (but Extreme Networks and XORP use similar formats), because they felt like a useful thing to have. Concepts such as "instances". An collection of instances looks like this:
 
@@ -94,7 +98,7 @@ cars [ bob; steve; jake ];
 This is because `|` is treated as whitespace, and value termination `;` and `,` is  optional inside an array.
 
 
-Array members are anonymous - you can nest a branch in an array:
+Array members are anonymous. You can nest a branch in an array:
 ```
 cars [ bob {something: true; somethingelse false;} jake ]
 ```
@@ -113,8 +117,7 @@ pushbike {
 	rear 6;
     }
 
-/* nope */
-
+    /* nope */
     { spokes 128; hubs 2; }
 
 }
@@ -132,4 +135,4 @@ Yes, this is all very loose, but *flexible* is the key.
 
 Barser scans the input buffer byte by byte, skipping whitespaces, waiting for control characters and recognising character classes based on a 256-slot lookup table. As the scanner state machine passes through different stages, events are raised and processed accordingly. Barser accumulates string tokens in a stack and processes them once a specific control element or token count is reached - the scanner raises an event which is then picked up by the worker function inserting nodes.
 
-Barser uses strdup() extensively - it does not reuse the existing buffer. The buffer could come from mmap for example - and what happens then? Also the dictionary is to be mutable. For those reasons strings are dynamically allocated and live in the dictionary.
+Barser does not reuse the existing buffer. The buffer could come from mmap for example - and what happens then? Also the dictionary is to be mutable. For those reasons strings are dynamically allocated and live in the dictionary. Unquoted tokens are copied from the buffer, but quoted strings grow as they are copied byte by byte, because they need to be checked for escape sequences.

@@ -26,25 +26,25 @@
 */
 
 /**
- * @file   xxh.h
- * @date   Fri Sep 14 23:27:00 2018
+ * @file   barser_index.h
+ * @date   Sun Apr15 13:40:12 2018
  *
- * @brief  An implemantation of xxHash by Yann Collet
+ * @brief  Barser index function declarations
  *
  */
 
-#ifndef XXH_H_
-#define XXH_H_
+#ifndef BARSER_INDEX_H_
+#define BARSER_INDEX_H_
 
-#include <stdint.h>
+/* create index */
+extern void* bsIndexCreate();
+/* free index */
+extern void bsIndexFree(void* index);
+/* retrieve node from index */
+extern void* bsIndexGet(void *index, const uint32_t hash);
+/* insert node into index */
+extern void bsIndexPut(BsDict *dict, BsNode* node);
+/* delete node from index */
+extern void bsIndexDelete(void *index, const BsNode* node);
 
-/* these are placed in the header so they can be reused */
-
-/* rotate left. any decent compiler should turn this into rol (or ror on little-endians) */
-#define rol32(var, pos) (((var) << pos) | ((var) >> (32 - pos)))
-/* rotate right - same */
-#define ror32(var, pos) (((var) >> pos) | ((var) << (32 - pos)))
-
-uint32_t xxHash32(const void* in, const size_t len);
-
-#endif /* XXH_H_ */
+#endif /* BARSER_INDEX_H_ */

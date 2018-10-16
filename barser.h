@@ -37,11 +37,14 @@
 #define BARSER_H_
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include "linked_list.h"
+#include "rbt/rbt.h"
 #include "barser_defaults.h"
 
-/* BarserNode / BarserDict is a simple hierarchical data parser,
+/* BsNode / BsDict is a simple hierarchical data parser,
  * with a tree structure and path-based retrieval (/parent/child/grandchild)
  */
 
@@ -95,34 +98,43 @@
 
 /* node types */
 enum {
-    BP_NODE_ROOT = 0,
-    BP_NODE_BRANCH,
-    BP_NODE_LEAF,
-    BP_NODE_ARRAY,
-    BP_NODE_COLLECTION,
+    BS_NODE_ROOT = 0,
+    BS_NODE_BRANCH,
+    BS_NODE_LEAF,
+    BS_NODE_ARRAY,
+    BS_NODE_COLLECTION,
+};
+
+/* node value types */
+enum {
+    BS_VAL_NULL,
+    BS_VAL_STRING,
+    BS_VAL_BOOL,
+    BS_VAL_INT,
+    BS_VAL_FLOAT
 };
 
 /* parser error codes */
 enum {
-    BP_PERROR_NONE = 0,		/* no error */
-    BP_PERROR_EOF,		/* unexpected EOF */
-    BP_PERROR_UNEXPECTED,	/* unexpected character */
-    BP_PERROR_EXP_ID,		/* expected identifier / name */
-    BP_PERROR_UNEXP_ID,		/* unexpected identifier */
-    BP_PERROR_TOKENS,		/* too many consecutive identifiers */
-    BP_PERROR_LEVEL,		/* unbalanced brackes */
-    BP_PERROR_BLOCK,		/* unexpected structure element */
-    BP_PERROR_NULL,		/* uninitialised / NULL dictionary */
-    BP_PERROR			/* generic / internal / other error */
+    BS_PERROR_NONE = 0,		/* no error */
+    BS_PERROR_EOF,		/* unexpected EOF */
+    BS_PERROR_UNEXPECTED,	/* unexpected character */
+    BS_PERROR_EXP_ID,		/* expected identifier / name */
+    BS_PERROR_UNEXP_ID,		/* unexpected identifier */
+    BS_PERROR_TOKENS,		/* too many consecutive identifiers */
+    BS_PERROR_LEVEL,		/* unbalanced brackes */
+    BS_PERROR_BLOCK,		/* unexpected structure element */
+    BS_PERROR_NULL,		/* uninitialised / NULL dictionary */
+    BS_PERROR			/* generic / internal / other error */
 };
 
 /* node operation result codes */
 enum {
-    BP_NODE_OK = 0,		/* Whatever went OK */
-    BP_NODE_NOT_FOUND,		/* Node not found in dictionary */
-    BP_NODE_WRONG_DICT,		/* Node does not belong to this dictionary */
-    BP_NODE_EXISTS,		/* Node already exists (i.e. cannot add) */
-    BP_NODE_FAIL,		/* All other errors: cannot remove root node, etc */
+    BS_NODE_OK = 0,		/* Whatever went OK */
+    BS_NODE_NOT_FOUND,		/* Node not found in dictionary */
+    BS_NODE_WRONG_DICT,		/* Node does not belong to this dictionary */
+    BS_NODE_EXISTS,		/* Node already exists (i.e. cannot add) */
+    BS_NODE_FAIL,		/* All other errors: cannot remove root node, etc */
 };
 
 /* shorthand macro to check if (int!) c is a character of class cl (above) */
@@ -132,7 +144,7 @@ typedef struct {
     char* data;
     size_t len;
     unsigned int quoted;
-} BarserToken;
+} BsToken;
 
 /* parser state container */
 typedef struct {
@@ -146,7 +158,7 @@ typedef struct {
     char *linestart;		/* start position of current line */
     char *slinestart;		/* start position of line when entered state */
 
-    BarserToken tokenCache[BP_MAX_TOKENS]; /* token cache */
+    BsToken tokenCache[BS_MAX_TOKENS]; /* token cache */
 
     size_t linepos;		/* position in line */
     size_t lineno;		/* line number */
@@ -164,57 +176,80 @@ typedef struct {
     /* current adjacent token count */
     unsigned int tokenCount;
 
-} BarserState;
+} BsState;
 
-typedef struct BarserDict BarserDict;
+typedef struct BsDict BsDict;
 
-typedef struct BarserNode BarserNode;
-struct BarserNode {
+typedef struct BsNode BsNode;
+struct BsNode {
     char *name;				/* node name */
     char *value;			/* node value */
 
-    LL_HOLDER(BarserNode);		/* linked list root */
-    LL_MEMBER(BarserNode);		/* but also a linked list member */
+    LL_HOLDER(BsNode);			/* linked list root */
+    LL_MEMBER(BsNode);			/* but also a linked list member */
 
-    BarserNode *parent;			/* parent of our node, NULL for root */
-    BarserDict *dict;			/* dictionary pointer */
+    BsNode *parent;			/* parent of our node, NULL for root */
 
-    size_t _pathLen;			/* path length */
+    size_t nameLen;			/* name length */
+    uint32_t hash;			/* sum of hashes from root to this guy */
     int childCount;			/* fat bastard on benefits and dodgy DLA */
-    unsigned int type;			/* type enum */
+    unsigned int type;			/* node type enum */
     unsigned int flags;			/* flags - quoted name, quoted value, etc. */
+
+    int collcount;			/* temporary, for collision monitoring */
 };
 
 /* node flags */
-#define BP_QUOTED_VALUE (1<<0)
-#define BP_QUOTED_NAME  (1<<1)
+#define BS_QUOTED_VALUE (1<<0)
+#define BS_QUOTED_NAME  (1<<1)
 
 /* the dictionary */
-struct BarserDict {
-    BarserNode *root;		/* root node */
+struct BsDict {
+    BsNode *root;		/* root node */
     char *name;			/* well, a name */
+    void *index;		/* abstract index */
+    int collcount;		/* collision count */
+    int maxcoll;		/* maximum collisions to same entry */
     size_t nodecount;		/* total node count. */
 };
 
 size_t getFileBuf(char **buf, const char *fileName);
 
 /* create and initialise a dictionary */
-BarserDict *createBarserDict(const char *name);
+BsDict *bsCreate(const char *name);
 
 /* create new node in dictionary, attached to parent, of type type with name name */
-BarserNode* createBarserNode(BarserDict *dict, BarserNode *parent, const unsigned int type, const char* name);
+BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, const char* name);
 
 /* clean up and free dictionary */
-void freeBarserDict(BarserDict *dict);
+void bsFree(BsDict *dict);
 
 /* parse contents of a char buffer */
-BarserState barseBuffer(BarserDict *dict, char *buf, size_t len);
+BsState bsParse(BsDict *dict, char *buf, size_t len);
 
 /* display parser error */
-void printBarserError(BarserState *state);
+void bsPrintError(BsState *state);
 
 /* output dictionary contents to file */
-void dumpBarserDict(FILE* fl, BarserDict *dict);
+void bsDump(FILE* fl, BsDict *dict);
+/* recursively output node contents to a file, return number of bytes written */
+int bsDumpNode(FILE* fl, BsNode *node);
+
+/* retrieve entry from dictionary root based on path */
+BsNode* bsQuery(BsDict *dict, const char* qry);
+/* retrieve entry from dictionary node based on path */
+BsNode* bsQueryNode(BsDict* dict, BsNode *node, const char* qry);
+/*
+ * Put BS_PATH_SEP-separated path of given node into out. If out is NULL,
+ * required string lenth (including zero-termination) is returned and no
+ * extraction is done. Otherwise the length should be passed as @outlen,
+ * and path is copied into *out.
+ */
+size_t bsGetPath(BsNode *node, char* out, const size_t outlen);
+/* allocate space on the stack and get node path */
+#define BS_GETNP(node, var) size_t var##_size = bsGetPath(node, NULL, 0);\
+				    char var[var##_size];\
+				    bsGetPath(node, var, var##_size);
 
 #endif /* BARSER_H_ */
 

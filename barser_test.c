@@ -44,6 +44,8 @@
 #include <unistd.h>
 #include <time.h>
 
+#include "xxh.h"
+
 #include "barser.h"
 
 /* basic duration measurement macros */
@@ -59,20 +61,21 @@ int main(int argc, char **argv) {
 
     DUR_INIT(test);
     char* buf = NULL;
+    char* qry = NULL;
     size_t len;
 
     if(argc < 2) {
 
-	fprintf(stderr, "Error: no arguments given.\n\nUsage: %s <filename> [-p]\n\n-p\t\t dump parsed contents\n\n",
+	fprintf(stderr, "Error: no arguments given.\n\nUsage: %s <filename> [-p] [\"path/to/node\"]\n\n<filename>\tread input from file or stdin (\"-\")\n-p\t\tdump parsed contents to stdout\npath/to/node\tretrieve contents of node with given path\n\n",
 		argv[0]);
 
 	return -1;
 
     }
 
-    BarserDict *dict = createBarserDict("test");
+    BsDict *dict = bsCreate("test");
 
-    fprintf(stderr, "Loading %s into memory... ", argv[1]);
+    fprintf(stderr, "Loading \"%s\" into memory... ", argv[1]);
     fflush(stderr);
 
     DUR_START(test);
@@ -80,6 +83,7 @@ int main(int argc, char **argv) {
 
     if(len <= 0 || buf == NULL) {
 	fprintf(stderr, "Error: could not read input file\n");
+	return -1;
     }
 
     DUR_END(test);
@@ -92,26 +96,43 @@ int main(int argc, char **argv) {
     fflush(stderr);
 
     DUR_START(test);
-    BarserState state = barseBuffer(dict, buf, len);
-
+    BsState state = bsParse(dict, buf, len);
     DUR_END(test);
 
     fprintf(stderr, "done.\n");
     fprintf(stderr, "Parsed in %llu ns, %.03f MB/s, %zu nodes, %.0f nodes/s\n",
 		test_delta, (1000000000.0 / test_delta) * (len / 1000000.0),
 		dict->nodecount, (1000000000.0 / test_delta) * dict->nodecount);
+    fprintf(stderr, "Total index collisions %d, max per node %d\n", dict->collcount, dict->maxcoll);
+
 
     if(state.parseError) {
 
-	printBarserError(&state);
+	bsPrintError(&state);
 
-    } else if(argc >= 3 && !strcmp(argv[2], "-p")) {
+    } else if(argc >= 3) {
 
-	dumpBarserDict(stdout, dict);
-
+	if(!strcmp(argv[2], "-p")) {
+	    bsDump(stdout, dict);
+	    if(argc >= 4) {
+		qry = argv[3];
+	    }
+	} else {
+		qry = argv[2];
+	}
     }
 
-    freeBarserDict(dict);
+    if(qry != NULL) {
+	BsNode* node = bsQuery(dict, qry);
+	if(node != NULL) {
+	    printf("Node found, hash of query \"%s\" is: 0x%08x, node name \"%s\":\n", qry, node->hash, node->name);
+	    bsDumpNode(stdout, node);
+	} else {
+	    printf("Nothing found for query \"%s\"\n", qry);
+	}
+    }
+
+    bsFree(dict);
 
     free(buf);
 
