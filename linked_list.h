@@ -29,12 +29,15 @@
  * @file   linked_list.h
  * @date   Sat Jan 9 16:14:10 2015
  *
- * @brief  linked list management macros
- *
+ * @brief  doubly linked list implemented as macros for inclusion in structures,
+ *         and as a standalone structure.
  */
 
 #ifndef CCK_LINKEDLIST_H_
 #define CCK_LINKEDLIST_H_
+
+#include <stdint.h>
+#include <stdbool.h>
 
 /* static list parent / holder in a module */
 #define LL_ROOT(vartype) \
@@ -115,6 +118,12 @@
     var->_next = NULL; \
     var->_prev = NULL; \
     var->_first = NULL;
+/* simple check if list is empty */
+#define LL_EMPTY_DYNAMIC(holder) ((holder)->firstChild == NULL\
+				 && (holder)->_lastChild == NULL)
+
+/* simple check if local list is empty */
+#define LL_EMPTY_STATIC() (_first == NULL && _last == NULL)
 
 /* foreach loop within a module, assigning var as we walk */
 #define LL_FOREACH_STATIC(var) \
@@ -152,4 +161,39 @@
     vartype *_last; \
     } _pool; \
 
+/* linked list member */
+typedef struct LListMember LListMember;
+struct LListMember {
+    LL_MEMBER(LListMember);
+    void* value;
+};
+
+/* linked list head */
+typedef struct {
+    LL_HOLDER(LListMember);
+} LList;
+
+
+/* basic linked list management code */
+
+/* create a linked list */
+LList* llCreate();
+/* free a linked list and all its members */
+void llFree(LList* list);
+/* free linked list members only */
+void llEmpty(LList* list);
+/* append item to list */
+void llAppendItem(LList* list, void* item);
+/* remove item from list */
+void llRemoveItem(LList* list, const void* item);
+/* remove list member from list */
+void llRemove(LList* list, LListMember *member);
+/* check if list contains member and return it ( magpie robin thrush sparrow warbler pipit COCK ) */
+LListMember* llGetMember(LList* list, const LListMember * member);
+/* check if list contains item and return member */
+LListMember* llGetItemHolder(LList* list, const void *item);
+/* check if list is empty */
+bool llisEmpty(const LList* list);
+
 #endif /* CCK_LINKEDLIST_H_ */
+
