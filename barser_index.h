@@ -43,7 +43,7 @@ extern void bsIndexFree(void* index);
 /* retrieve node from index */
 extern void* bsIndexGet(void *index, const uint32_t hash);
 /* insert node into index */
-extern void bsIndexPut(BsDict *dict, BsNode* node);
+extern void bsIndexPut(BsDict *dict, const BsNode* node);
 /* delete node from index */
 extern void bsIndexDelete(void *index, const BsNode* node);
 

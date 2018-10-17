@@ -79,15 +79,6 @@ memset(name, 0, name ## _len);
 #define INT_STRSIZE (3 * sizeof(int) + 3)
 #endif
 
-/* min, max, everybody needs min/max */
-#ifndef min
-#define min(a,b) ((a < b) ? (a) : (b))
-#endif
-
-#ifndef max
-#define max(a,b) ((a > b) ? (a) : (b))
-#endif
-
 /* shorthand to dump the token stack contents */
 #define tdump()\
 		fprintf(stderr, "Token cache with %d items: ", state.tokenCount);\
@@ -782,10 +773,22 @@ static inline BsNode* getNodeChild(BsDict* dict, BsNode *parent, const char* nam
 
     if(name != NULL && namelen > 0) {
 
-	BsNode *n = bsIndexGet(dict->index, BS_MIX_HASH(xxHash32(name, namelen), parent->hash, namelen));
+	LList *l = bsIndexGet(dict->index, BS_MIX_HASH(xxHash32(name, namelen), parent->hash, namelen));
 
-	if(n != NULL && n->parent == parent) {
-		return n;
+	if(l != NULL) {
+
+	    LListMember *m;
+	    BsNode* n;
+
+	    LL_FOREACH_DYNAMIC(l, m) {
+
+		n = m->value;
+		if(n != NULL && n->parent == parent) {
+		    return n;
+		}
+
+	    }
+
 	}
     }
 
@@ -1791,8 +1794,24 @@ static inline size_t cleanupQuery(char* query) {
     return slen;
 }
 
+/* return a new string containing cleaned up query */
+static inline char* getCleanQuery(const char* query) {
+
+    size_t sl = strlen(query);
+    char* cqry = malloc(sl);
+
+    if(cqry != NULL) {
+	memcpy(cqry, query, sl);
+	cqry[sl] = '\0';
+	cleanupQuery(cqry);
+	return cqry;	
+    }
+
+    return NULL;
+}
+
 /* compute the compound hash of a query path rooted ad node @root */
-static inline uint32_t bsQueryHash(BsNode* root, const char* query) {
+static inline uint32_t bsGetPathHash(BsNode* root, const char* query) {
 
     uint32_t hash;
     BsToken tok;
@@ -1816,11 +1835,34 @@ static inline uint32_t bsQueryHash(BsNode* root, const char* query) {
 
 }
 
-/* find a descendant of node based on path - to be rewritten to retrieve linked lists */
-BsNode* bsQueryNode(BsDict* dict, BsNode *node, const char* qry) {
+/* find a descendant of node based on path, and verify that path matches */
+BsNode* bsNodeGet(BsDict* dict, BsNode *node, const char* qry) {
 
     if(qry != NULL) {
-	return bsIndexGet(dict->index, bsQueryHash(node, qry));
+
+        char* cqry = getCleanQuery(qry);
+
+	if(cqry != NULL) {
+
+	    LList* l =  bsIndexGet(dict->index, bsGetPathHash(node, qry));
+	    LListMember *m;
+
+	    LL_FOREACH_DYNAMIC(l, m) {
+
+		BsNode* n = m->value;
+		BS_GETNP(n, path);
+
+		if(!strcmp(cqry, path)) {
+		    free(cqry);
+		    return n;
+		}
+
+	    }
+
+	    free(cqry);
+
+	}
+
     }
 
     return NULL;
@@ -1828,7 +1870,7 @@ BsNode* bsQueryNode(BsDict* dict, BsNode *node, const char* qry) {
 }
 
 /* only a shortcut to query the root of the dictionary */
-BsNode* bsQuery(BsDict* dict, const char* qry) {
+BsNode* bsGet(BsDict* dict, const char* qry) {
 
-    return bsQueryNode(dict, dict->root, qry);
+    return bsNodeGet(dict, dict->root, qry);
 }

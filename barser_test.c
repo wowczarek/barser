@@ -63,10 +63,12 @@ int main(int argc, char **argv) {
     char* buf = NULL;
     char* qry = NULL;
     size_t len;
+    int ret = 0;
+    size_t nodecount;
 
     if(argc < 2) {
 
-	fprintf(stderr, "Error: no arguments given.\n\nUsage: %s <filename> [-p] [\"path/to/node\"]\n\n<filename>\tread input from file or stdin (\"-\")\n-p\t\tdump parsed contents to stdout\npath/to/node\tretrieve contents of node with given path\n\n",
+	fprintf(stderr, "Error: no arguments given.\n\nUsage: %s <filename> [-p] [\"path/to/node\"]\n\nfilename\tread input from file or stdin (\"-\")\n-p\t\tdump parsed contents to stdout\npath/to/node\tretrieve contents of node with given path\n\n",
 		argv[0]);
 
 	return -1;
@@ -104,11 +106,12 @@ int main(int argc, char **argv) {
 		test_delta, (1000000000.0 / test_delta) * (len / 1000000.0),
 		dict->nodecount, (1000000000.0 / test_delta) * dict->nodecount);
     fprintf(stderr, "Total index collisions %d, max per node %d\n", dict->collcount, dict->maxcoll);
-
+    nodecount = dict->nodecount;
 
     if(state.parseError) {
 
 	bsPrintError(&state);
+	return -1;
 
     } else if(argc >= 3) {
 
@@ -123,19 +126,29 @@ int main(int argc, char **argv) {
     }
 
     if(qry != NULL) {
-	BsNode* node = bsQuery(dict, qry);
+	BsNode* node = bsGet(dict, qry);
 	if(node != NULL) {
 	    printf("Node found, hash of query \"%s\" is: 0x%08x, node name \"%s\":\n", qry, node->hash, node->name);
 	    bsDumpNode(stdout, node);
 	} else {
 	    printf("Nothing found for query \"%s\"\n", qry);
+	    ret = 2;
 	}
     }
 
+    fprintf(stderr, "Freeing dictionary... ");
+    fflush(stderr);
+
+    DUR_START(test);
     bsFree(dict);
+    DUR_END(test);
+
+    fprintf(stderr, "done.\n");
+    fprintf(stderr, "Freed in %llu ns, %zu nodes, %.0f nodes/s\n",
+		test_delta, nodecount, (1000000000.0 / test_delta) * nodecount);
 
     free(buf);
 
-    return 0;
+    return ret;
 
 }

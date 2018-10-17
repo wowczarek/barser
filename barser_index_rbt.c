@@ -29,7 +29,7 @@
  * @file   rbt_index.c
  * @date   Sun Apr15 13:40:12 2018
  *
- * @brief  A red-black tree based index implementation for barser;
+ * @brief  A red-black tree based index implementation for barser
  *
  */
 
@@ -37,17 +37,8 @@
 #include <stdint.h>
 
 #include "rbt/rbt.h"
+#include "linked_list.h"
 #include "barser.h"
-
-/* min, max, everybody needs min/max */
-#ifndef min
-#define min(a,b) ((a < b) ? (a) : (b))
-#endif
-
-#ifndef max
-#define max(a,b) ((a > b) ? (a) : (b))
-#endif
-
 
 /*
  * index management wrappers for rbt
@@ -56,21 +47,27 @@
 /* create index */
 void* bsIndexCreate() {
 
-    return rbCreate();
-
+    return rbCreatePrealloc(sizeof(LList), NULL);
 }
 
 /* free index */
 void bsIndexFree(void* index) {
+
     rbFree(index);
+
 }
 
-/* retrieve node from index */
-void* bsIndexGet(void *index, const uint32_t hash) {
+/* retrieve node list from index */
+LList* bsIndexGet(void *index, const uint32_t hash) {
 
     RbNode *ret = rbSearch(((RbTree*)index)->root, hash);
-    /* this will eventually return a linked list to handle collisions - we don't care */
-    return (ret == NULL) ? ret : ret->value;
+
+    if(ret != NULL) {
+	return ret->value;
+    }
+
+    return NULL;
+
 }
 
 /* insert node into index */
@@ -78,32 +75,41 @@ void bsIndexPut(BsDict *dict, BsNode* node) {
 
     RbNode* inode = rbInsert((RbTree*)(dict->index), node->hash);
 
-    if(inode->value != NULL) {
-	BsNode *v = inode->value;
-	BS_GETNP(node, p1);
-	BS_GETNP(v, p2);
-#ifdef COLL_DEBUG
-#include <stdio.h>
-	printf("'%s' and '%s' share hash 0x%08x\n", p1, p2, node->hash);
-#endif
-	dict->collcount++;
-	v->collcount++;
-	dict->maxcoll = max(dict->maxcoll, v->collcount);
-    } else {
-	inode->value = node;
-    }
+    if(inode != NULL && inode->value != NULL) {
+
+	LList *l = inode->value;
+
+	if(!llisEmpty(l)) {
+	    BsNode* n = l->_firstChild->value;
+	    BS_GETNP(n, p1);
+	    BS_GETNP(node, p2);
+	    #ifdef COLL_DEBUG
+	    #include <stdio.h>
+	    printf("'%s' and '%s' share hash 0x%08x\n", p1, p2, node->hash);
+	    #endif
+	    dict->collcount++;
+	    n->collcount++;
+	    dict->maxcoll = max(dict->maxcoll, n->collcount);
+
+	}
+
+	llAppendItem(l, node);
+
+    } 
 
 }
 
 /* delete node from index */
-void bsIndexDelete(void *index, const BsNode* node) {
+void bsIndexDelete(void *index, BsNode* node) {
 
     RbTree *tree = index;
 
     RbNode *n = rbSearch(tree->root, node->hash);
 
-    if(n != NULL && n->value == node) {
-	rbDeleteNode(tree, n);
+    if(n != NULL) {
+
+	llRemoveItem(n->value, node);
+	
     }
 
 }

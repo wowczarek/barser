@@ -236,9 +236,9 @@ void bsDump(FILE* fl, BsDict *dict);
 int bsDumpNode(FILE* fl, BsNode *node);
 
 /* retrieve entry from dictionary root based on path */
-BsNode* bsQuery(BsDict *dict, const char* qry);
+BsNode* bsGet(BsDict *dict, const char* qry);
 /* retrieve entry from dictionary node based on path */
-BsNode* bsQueryNode(BsDict* dict, BsNode *node, const char* qry);
+BsNode* bsNodeGet(BsDict* dict, BsNode *node, const char* qry);
 /*
  * Put BS_PATH_SEP-separated path of given node into out. If out is NULL,
  * required string lenth (including zero-termination) is returned and no
@@ -250,6 +250,15 @@ size_t bsGetPath(BsNode *node, char* out, const size_t outlen);
 #define BS_GETNP(node, var) size_t var##_size = bsGetPath(node, NULL, 0);\
 				    char var[var##_size];\
 				    bsGetPath(node, var, var##_size);
+
+/* min, max, everybody needs min/max */
+#ifndef min
+#define min(a,b) ((a < b) ? (a) : (b))
+#endif
+
+#ifndef max
+#define max(a,b) ((a > b) ? (a) : (b))
+#endif
 
 #endif /* BARSER_H_ */
 
