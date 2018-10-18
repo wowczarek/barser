@@ -136,11 +136,32 @@ int main(int argc, char **argv) {
 	}
     }
 
+    fprintf(stderr, "Duplicating dictionary... ");
+    fflush(stderr);
+    DUR_START(test);
+    BsDict* dup = bsDuplicate(dict, "newdict");
+    DUR_END(test);
+
+    fprintf(stderr, "done.\n");
+    fprintf(stderr, "Duplicated in %llu ns, %zu nodes, %.0f nodes/s\n",
+		test_delta, nodecount, (1000000000.0 / test_delta) * dup->nodecount);
+
     fprintf(stderr, "Freeing dictionary... ");
     fflush(stderr);
 
     DUR_START(test);
     bsFree(dict);
+    DUR_END(test);
+
+    fprintf(stderr, "done.\n");
+    fprintf(stderr, "Freed in %llu ns, %zu nodes, %.0f nodes/s\n",
+		test_delta, nodecount, (1000000000.0 / test_delta) * nodecount);
+
+    fprintf(stderr, "Freeing duplicate... ");
+    fflush(stderr);
+
+    DUR_START(test);
+    bsFree(dup);
     DUR_END(test);
 
     fprintf(stderr, "done.\n");

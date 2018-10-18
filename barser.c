@@ -715,7 +715,10 @@ static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned
 	} else {
 	    dict->root = ret;
 	    ret->type = BS_NODE_ROOT;
-	    ret->name = NULL;
+	    ret->name = malloc(1);
+	    if(ret->name != NULL) {
+		ret->name[0] = '\0';
+	    }
 	    ret->hash = BS_ROOT_HASH;
 	}
 
@@ -889,6 +892,47 @@ void bsFree(BsDict *dict) {
 
 }
 
+static inline char* unescapeString(char *str) {
+
+    int c;
+    char *in = str;
+    size_t len = 0;
+    bool captured = false;
+
+    /* keep scanning */
+    while((c = *in) != '\0') {
+
+	if(c == BS_ESCAPE_CHAR) {
+	    c = *++in;
+
+	    /* this is  an escape sequence */
+	    if(cclass(BF_ESS)) {
+		/* place the corresponding control char */
+		str[len] = esccodes[c];
+		captured = true;
+	    }
+	}
+
+	if(captured) {
+	    captured = false;
+	} else {
+	    str[len] = c;
+	    if(c == '\0') {
+		break;
+	    }
+	}
+
+	in++;
+	len++;
+
+    }
+
+    str[len] = '\0';
+
+    return str;
+
+}
+
 /* walk through string @in, and write to + return next token between the 'sep' character */
 static inline BsToken* unescapeToken(BsToken* out, char** in, const char sep) {
 
@@ -969,6 +1013,49 @@ failure:
     return NULL;
 
 }
+
+/* node rehash callback */
+static void* bsRehashCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* cont) {
+
+    if(node->parent != NULL) {
+	bsIndexDelete(dict->index, node);
+	node->hash = BS_MIX_HASH(xxHash32(node->name, node->nameLen), node->parent->hash, node->nameLen);
+	bsIndexPut(dict, node);
+    }
+
+    return NULL;
+}
+
+/* run a callback recursively on node, return node where callback stoped the walk */
+BsNode* bsNodeWalk(BsDict *dict, BsNode *node, void* user, void* feedback, BsCallback callback) {
+
+    bool cont = true;
+
+    BsNode *n, *o;
+
+    void* feedback1 = callback(dict, node, user, feedback, &cont);
+
+    if(!cont) {
+	return node;
+    }
+
+    LL_FOREACH_DYNAMIC(node,n) {
+	o = bsNodeWalk(dict, n, user, feedback1, callback);
+	if(o != NULL) {
+	    return o;
+	}
+    }
+
+    return NULL;
+}
+
+/* run a callback recursively on dictionary, return node where callback stopped the walk */
+BsNode*  bsWalk(BsDict *dict, void* user, BsCallback callback) {
+
+    return bsNodeWalk(dict, dict->root, user, NULL, callback);
+
+}
+
 
 /* print parser error - must be done before the source buffer is freed */
 void bsPrintError(BsState *state) {
@@ -1794,6 +1881,8 @@ static inline size_t cleanupQuery(char* query) {
     return slen;
 }
 
+
+
 /* return a new string containing cleaned up query */
 static inline char* getCleanQuery(const char* query) {
 
@@ -1873,4 +1962,76 @@ BsNode* bsNodeGet(BsDict* dict, BsNode *node, const char* qry) {
 BsNode* bsGet(BsDict* dict, const char* qry) {
 
     return bsNodeGet(dict, dict->root, qry);
+}
+
+
+/* rename a node and recursively reindex if necessary */
+void bsRenameNode(BsDict* dict, BsNode* node, const char* newname) {
+
+    if(node != NULL && node->parent != NULL && newname != NULL) {
+
+	/* no renaming of array members */
+	if(node->parent->type == BS_NODE_ARRAY) {
+	    return;
+	}
+
+	uint32_t newhash = BS_MIX_HASH(xxHash32(node->name, node->nameLen), node->parent->hash, node->nameLen);
+	BsToken tok = { (char*)newname, strlen(newname), false };
+	free(node->name);
+	node->name = getTokenData(&tok);
+	node->nameLen = tok.len;
+
+	/* no need to rehash in the rare case that hash did not change */
+	if(newhash != node->hash) {
+	    bsNodeWalk(dict, node, NULL, NULL, bsRehashCallback);
+	}
+
+    }
+
+}
+
+/*
+ * dictionary duplication callback. the feedback is a pointer to the new node
+ * that was created before we started iterating over its children - thanks to
+ * the feedback mechanism we always add to the correct node.
+ */
+static void *bsDupCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* cont) {
+
+    BsDict *dest = user;
+    BsNode* target = feedback;
+
+    BsNode* newnode = bsCreateNode(dest, target, node->type, node->name);
+
+    if(newnode != NULL) {
+	newnode->flags = node->flags;
+	/* duplicate value */
+	if(node->type == BS_NODE_LEAF && node->value != NULL) {
+	    size_t vlen = strlen(node->value);
+	    newnode->value = malloc(vlen + 1);
+	    if(newnode->value != NULL) {
+		memcpy(newnode->value, node->value, vlen);
+		newnode->value[vlen] = '\0';
+	    }
+	}
+    }
+
+    return newnode;
+
+}
+
+/* duplicate a dictionary, give new name to resulting dictionary */
+BsDict* bsDuplicate(BsDict *source, const char* newname) {
+
+    BsDict* dest = bsCreate(newname);
+
+
+    if(dest == NULL) {
+	return NULL;
+    }
+
+    /* magic */
+    bsNodeWalk(source, source->root, dest, dest->root, bsDupCallback);
+
+    return dest;
+
 }

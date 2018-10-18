@@ -96,6 +96,15 @@
      *
      */
 
+/* min, max, everybody needs min/max */
+#ifndef min
+#define min(a,b) ((a < b) ? (a) : (b))
+#endif
+
+#ifndef max
+#define max(a,b) ((a > b) ? (a) : (b))
+#endif
+
 /* node types */
 enum {
     BS_NODE_ROOT = 0,
@@ -213,6 +222,23 @@ struct BsDict {
     size_t nodecount;		/* total node count. */
 };
 
+/*
+ * callback type. parameters: dict, node, user, feedback, cont
+ *       dict: this node's dictionary
+ *       node: this node
+ *       user: user data
+ *   feedback: Pointer returned by this callback's run on a node
+ *             before iterating over its children (preorder traversal),
+ *             this allows interaction between the callback running
+ *             on a node's parent with the callbacks running on the node.
+ *       cont: pointer to a boolean. If the callback sets the underlying
+ *             bool to false, iteration stops.
+ */
+typedef void* (*BsCallback) (BsDict*, BsNode*, void*, void*, bool*);
+/* use this if you want, but readability will suffer */
+#define BS_CB_ARGS BsDict *dict, BsNode *node, void* user, void* feedback, bool* cont
+
+/* TAKE FILE. PUT FILE IN BUFFER. FILE CAN BE "-" FOR STDIN. RETURN BUFFER */
 size_t getFileBuf(char **buf, const char *fileName);
 
 /* create and initialise a dictionary */
@@ -224,11 +250,19 @@ BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, cons
 /* clean up and free dictionary */
 void bsFree(BsDict *dict);
 
+/* duplicate a dictionary, give new name to resulting dictionary */
+BsDict* bsDuplicate(BsDict *source, const char* newname);
+
 /* parse contents of a char buffer */
 BsState bsParse(BsDict *dict, char *buf, size_t len);
 
 /* display parser error */
 void bsPrintError(BsState *state);
+
+/* run a callback recursively on node, return node where callback stopped the walk */
+BsNode* bsNodeWalk(BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback);
+/* run a callback recursively on dictionary, return node where callback stopped the walk */
+BsNode* bsWalk(BsDict *dict, void* user, BsCallback callback);
 
 /* output dictionary contents to file */
 void bsDump(FILE* fl, BsDict *dict);
@@ -239,6 +273,10 @@ int bsDumpNode(FILE* fl, BsNode *node);
 BsNode* bsGet(BsDict *dict, const char* qry);
 /* retrieve entry from dictionary node based on path */
 BsNode* bsNodeGet(BsDict* dict, BsNode *node, const char* qry);
+
+/* rename a node and recursively reindex if necessary */
+void bsRenameNode(BsDict* dict, BsNode* node, const char* newname);
+
 /*
  * Put BS_PATH_SEP-separated path of given node into out. If out is NULL,
  * required string lenth (including zero-termination) is returned and no
@@ -251,14 +289,6 @@ size_t bsGetPath(BsNode *node, char* out, const size_t outlen);
 				    char var[var##_size];\
 				    bsGetPath(node, var, var##_size);
 
-/* min, max, everybody needs min/max */
-#ifndef min
-#define min(a,b) ((a < b) ? (a) : (b))
-#endif
-
-#ifndef max
-#define max(a,b) ((a > b) ? (a) : (b))
-#endif
 
 #endif /* BARSER_H_ */
 
