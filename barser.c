@@ -137,7 +137,7 @@ enum {
 };
 
 /* 'c' class check shorthand, assumes the presence of 'c' int variable */
-#define cclass(cl) (chflags[c] & (cl))
+#define cclass(cl) (chflags[(unsigned char)c] & (cl))
 
 /* save state when we encounter a section that can have unmatched or unterminated bounds */
 #define savestate(st) 		st->slinestart = st->linestart;\
@@ -215,18 +215,21 @@ static inline char* getTokenData(BsToken *token) {
 /* fetch next character from buffer and advance, return it as int or EOF if end reached */
 static inline int bsForward(BsState *state) {
 
-    state->prev = *(state->current++);
+    int c;
 
-    if(state->current == state->end) {
-	return EOF;
-    }
-
-    int c = *state->current;
-    state->c = c;
-
+    if(state->current >= state->end) {                                          
+        return EOF;                                                 
+    }         
+                                              
+    state->prev = state->c; 
+                                  
+    state->current++;
+    c = *state->current;                                  
+                                                                         
     if(c == '\0') {
-	return EOF;
-    }
+        state->c = EOF;
+        return EOF;
+    }                 
 
     /* we have a newline */
     if(cclass(BF_NLN)) {
@@ -236,7 +239,7 @@ static inline int bsForward(BsState *state) {
 	 * This is a cheap trick to handle Windows' CR-LF. Let me know if this even lands on Window.
 	 */
 	if(!(chflags[state->prev] & BF_NLN) || c == state->prev) {
-	    state->linestart = state->current;
+	    state->linestart = state->current + 1;
 	    state->lineno++;
 	    state->linepos = 0;
 	}
@@ -245,14 +248,14 @@ static inline int bsForward(BsState *state) {
 	state->linepos++;
     }
 
-    return c;
+    return (state->c = c);
 
 }
 
 /* peek at the next character without moving forward */
 static inline int bsPeek(BsState *state) {
 
-    if(state->current == state->end) {
+    if(state->current >= state->end) {
 	return EOF;
     }
 
@@ -1056,6 +1059,42 @@ BsNode*  bsWalk(BsDict *dict, void* user, BsCallback callback) {
 
 }
 
+/* print error hint */
+static void bsErrorHint(BsState *state) {
+
+	size_t lw = BS_ERRORDUMP_LINEWIDTH;
+	size_t hlw = lw / 2;
+	char *marker = state->linestart;
+	char linebuf[lw + 1];
+	char pointbuf[lw + 1];
+	bool rtrunc = true;
+
+
+	memset(pointbuf, ' ', lw);
+	memset(linebuf, 0, lw + 1);
+	pointbuf[lw] = '\0';
+
+	if(state->linepos > hlw) {
+	    marker += state->linepos - hlw;
+	    pointbuf[hlw] = '^';
+	} else {
+	    pointbuf[state->linepos] = '^';
+	}
+
+	for(int i = 0; i < lw ; i++) {
+	    if((*marker == '\0') || chclass(*marker, BF_NLN)) {
+		rtrunc = false;
+		break;
+	    }
+	    linebuf[i] = *(marker++);
+	}
+
+	fprintf(stderr,"\t%s%s%s\n\t%s%s\n",
+	    state->linepos > hlw ? "..." : "", linebuf,
+	    rtrunc ? "..." : "",
+	    state->linepos > hlw ? "   " : "", pointbuf);
+
+}
 
 /* print parser error - must be done before the source buffer is freed */
 void bsPrintError(BsState *state) {
@@ -1090,7 +1129,8 @@ void bsPrintError(BsState *state) {
 		fprintf(stderr, "Unexpected character: '%c' (0x%02x)", *state->current, *state->current);
 		break;
 	    case BS_PERROR_LEVEL:
-		fprintf(stderr, "Unbalanced bracket (s) found");
+		restorestate(state);
+		fprintf(stderr, "Unbalanced bracket(s) found");
 		break;
 	    case BS_PERROR_TOKENS:
 		fprintf(stderr, "Too many consecutive identifiers");
@@ -1113,22 +1153,7 @@ void bsPrintError(BsState *state) {
 	}
 
 	fprintf(stderr," at line %zd position %zd:\n\n", state->lineno, state->linepos);
-
-	size_t minwidth = min(state->linepos, BS_ERRORDUMP_LINEWIDTH / 2);
-	char linebuf[BS_ERRORDUMP_LINEWIDTH + 1];
-	char pointbuf[minwidth + 1];
-	linebuf[minwidth] = '\0';
-	pointbuf[minwidth] = '\0';
-	memset(linebuf, 0, BS_ERRORDUMP_LINEWIDTH);
-	memset(pointbuf, ' ', minwidth);
-	pointbuf[minwidth - 1] = '^';
-	memcpy(linebuf, state->linestart + (state->linepos - minwidth + 1), minwidth);
-
-	for(size_t i = minwidth; (i < BS_ERRORDUMP_LINEWIDTH) && !chclass((int)state->linestart[i+1], BF_NLN); i++) {
-	    linebuf[i] = state->linestart[i+1];
-	}
-
-	fprintf(stderr,"\t%s\n\t%s\n", linebuf, pointbuf);
+	bsErrorHint(state);
 
     }
 
@@ -1188,10 +1213,15 @@ static inline void bsScan(BsState *state) {
 			c = bsForward(state);
 			tok->len++;
 		}
-		/* raise a "got token" event */
-		state->parseEvent = BS_GOT_TOKEN;
-		state->scanState = BS_SKIP_WHITESPACE;
-		return;
+
+		/* raise a "got token" event if we got anything */
+		if(tok->len > 0) {
+		    state->scanState = BS_SKIP_WHITESPACE;
+		    state->parseEvent = BS_GOT_TOKEN;
+		    return;
+		}
+
+		break;
 
 	    case BS_GET_QUOTED:
 		ssize = BS_QUOTED_STARTSIZE;
@@ -1284,6 +1314,7 @@ static inline void bsScan(BsState *state) {
 
 	/* if no event raised, check for control characters, raise parser events and move search state accordingly */
 	if(state->parseEvent == BS_NONE) {
+
 	    switch(c) {
 #ifdef BS_QUOTE1_CHAR
 		case BS_QUOTE1_CHAR:
@@ -1358,7 +1389,7 @@ static inline void bsScan(BsState *state) {
 		case EOF:
 		    /* this is a 'legal' end of buffer, as opposed to unexpected EOF */
 		    state->parseEvent = BS_GOT_EOF;
-		     return;
+		    return;
 		default:
 		    if(cclass(BF_ILL)) {
 			state->parseEvent = BS_ERROR;
@@ -1408,7 +1439,7 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
     PST_INIT(nodestack);
 
     /* keep parsing until no more data or parser error encountered */
-    while(state.parseEvent != BS_GOT_EOF && !state.parseError) {
+    while(!state.parseError) {
 
 	state.parseEvent = BS_NONE;
 	state.parseError = BS_PERROR_NONE;
@@ -1527,25 +1558,29 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 	     */
 	    case BS_END_BLOCK:
 
-		/* leftover tokens without end-value termination are not allowed */
 		if(state.tokenCount == 0) {
-		    /* WOOP WOOP, WIND SHEAR, BANK ANGLE, PULL UP, TOO LOW, TERRAIN, TERRAIN */
+		    /* 
+		     * WOOP WOOP, WIND SHEAR, BANK ANGLE, PULL UP, TOO LOW, TERRAIN, TERRAIN
+		     * we cannot move up the node stack since we are already at the top
+		     */
 		    if(PST_EMPTY(nodestack)) {
 			state.parseEvent = BS_ERROR;
-			state.parseError = BS_PERROR_LEVEL;
+			state.parseError = BS_PERROR_BLOCK;
 			break;
 		    }
 		    head = PST_POP(nodestack);
 		    break;
 		}
 
-		/* What?! nope. */
+		/* end of block inside an array? nope. */
 		if(head->type == BS_NODE_ARRAY) {
 		    state.parseEvent = BS_ERROR;
 		    state.parseError = BS_PERROR_BLOCK;
 		    break;
 		}
 
+		/* fall-through to GOT_ENDVAL */
+	    
 	    /* we encountered an end of value indication like ';' or ',' (JSON) */
 	    case BS_GOT_ENDVAL:
 
@@ -1673,7 +1708,10 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 
 		/* aftermath of the previous fall-through */
 		if(state.parseEvent == BS_END_BLOCK) {
-		    /* WOOP WOOP, WIND SHEAR, BANK ANGLE, PULL UP, TOO LOW, TERRAIN, TERRAIN */
+		    /* 
+		     * WOOP WOOP, WIND SHEAR, BANK ANGLE, PULL UP, TOO LOW, TERRAIN, TERRAIN
+		     * we cannot move up the node stack since we are already at the top
+		     */
 		    if(PST_EMPTY(nodestack)) {
 			state.parseEvent = BS_ERROR;
 			state.parseError = BS_PERROR_LEVEL;
@@ -1750,29 +1788,34 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 	    /* array end block i.e. ']' */
 	    case BS_END_ARRAY:
 
-		if(head->type == BS_NODE_ARRAY) {
-		    /*
-		    * We allow some flexibility when constructing arrays. If we reach the end of an array,
-		    * any leftover tokens are added as array leaves. This means that an array can be defined
-		    * as a list of whitespace-separated tokens.
-		    */
-		    for(int i = 0; i < state.tokenCount; i++) {
-			newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0);
-			newnode->value = td(i);
-			newnode->flags = BS_QUOTED_VALUE & tq(i);
-		    }
 		/* end of arRAY OUTSIDE AN ARRAY?! What are you, some kind of an animal?! */
-		} else {
+		if(head->type != BS_NODE_ARRAY) {
 		    state.parseEvent = BS_ERROR;
 		    state.parseError = BS_PERROR_BLOCK;
 		}
 
-		/* WOOP WOOP, WIND SHEAR, BANK ANGLE, PULL UP, TOO LOW, TERRAIN, TERRAIN */
+		/*
+		 * We allow some flexibility when constructing arrays. If we reach the end of an array,
+		 * any leftover tokens are added as array leaves. This means that an array can be defined
+		 * as a list of whitespace-separated tokens.
+		 */
+		for(int i = 0; i < state.tokenCount; i++) {
+		    newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0);
+		    newnode->value = td(i);
+		    newnode->flags = BS_QUOTED_VALUE & tq(i);
+		}
+
+		/* 
+		 * WOOP WOOP, WIND SHEAR, BANK ANGLE, PULL UP, TOO LOW, TERRAIN, TERRAIN
+		 * we cannot move up the node stack since we are already at the top...
+		 * although in this particular case this should not really happen.
+		 */
 		if(PST_EMPTY(nodestack)) {
 		    state.parseEvent = BS_ERROR;
-		    state.parseError = BS_PERROR_LEVEL;
+		    state.parseError = BS_PERROR_BLOCK;
 		    break;
 		}
+
 		/* return to last branching point */
 		head = PST_POP(nodestack);
 
@@ -1780,12 +1823,14 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 
 		break;
 
-	    /* we got an EOF but were left with some tokens. */
 	    case BS_GOT_EOF:
+		/* we got an EOF but were left with some tokens. */
 		if(state.tokenCount > 0) {
 		    state.parseEvent = BS_ERROR;
 		    state.parseError = BS_PERROR_EOF;
 		}
+		/* all she wrote */
+		goto done;
 	    case BS_NONE:
 	    case BS_ERROR:
 	    default:
@@ -1793,6 +1838,8 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 	}
 
     }
+
+done:
 
     /* we should have ended back at the root, if not, we probably have unbalanced brackets */
     if(state.parseEvent != BS_ERROR && head != dict->root) {

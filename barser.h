@@ -147,7 +147,7 @@ enum {
 };
 
 /* shorthand macro to check if (int!) c is a character of class cl (above) */
-#define chclass(c, cl) (chflags[c] & (cl))
+#define chclass(c, cl) (chflags[(unsigned char)c] & (cl))
 
 typedef struct {
     char* data;

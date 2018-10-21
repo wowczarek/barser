@@ -94,7 +94,7 @@
  * is only meant to be included by barser.h, so, you know.
  */
 
-static const char chflags[256] = {
+static const unsigned char chflags[256] = {
 
     [  0] = BF_CTL | BF_NON /* NUL */, [ 64] = BF_TOK | BF_NON /* @   */, [128] = BF_ILL | BF_NON, [192] = BF_ILL | BF_NON,
     [  1] = BF_ILL | BF_NON /* SOH */, [ 65] = BF_TOK | BF_NON /* A   */, [129] = BF_ILL | BF_NON, [193] = BF_ILL | BF_NON,
