@@ -199,4 +199,3 @@ bool llisEmpty(const LList* list) {
     return(list->_firstChild == NULL);
 
 }
-

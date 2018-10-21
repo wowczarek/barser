@@ -1,6 +1,6 @@
 /* BSD 2-Clause License
  *
- * Copyright (c) 2018, Wojciech Owczarek
+ * Copyright (c) 2015-2018, Wojciech Owczarek
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -196,4 +196,3 @@ LListMember* llGetItemHolder(LList* list, const void *item);
 bool llisEmpty(const LList* list);
 
 #endif /* CCK_LINKEDLIST_H_ */
-
