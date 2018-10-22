@@ -126,7 +126,7 @@ enum {
 
 /* parser events */
 enum {
-    BS_NONE = 0,		/* nothing happened, keep scanning */
+    BS_NOEVENT = 0,		/* nothing happened, keep scanning */
     BS_GOT_TOKEN,	/* received a string */
     BS_GOT_ENDVAL,	/* received "end of value", such as ';' */
     BS_GOT_BLOCK,	/* received beginning of block, such as '{' */
@@ -170,7 +170,7 @@ static void bsInitState(BsState *state, char* buf, const size_t bufsize) {
 
     state->scanState = BS_SKIP_WHITESPACE;
 
-    state->parseEvent = BS_NONE;
+    state->parseEvent = BS_NOEVENT;
     state->parseError = BS_PERROR_NONE;
 
     state->tokenCount = 0;
@@ -413,9 +413,9 @@ _bsDumpNode(FILE* fl, BsNode *node, int level)
     /* fill up the buffer with indent char, but up to current level only */
     memset(indent, BS_INDENT_CHAR, maxwidth);
     memset(indent + level * BS_INDENT_WIDTH, '\0', BS_INDENT_WIDTH);
-#if 0
+#ifdef COLL_DEBUG
     fprintf(fl, "\n// hash: 0x%08x\n", node->hash);
-#endif
+#endif /* COLL_DEBUG */
     /* yessir... */
     indent[maxwidth] = '\0';
     if(node->type != BS_NODE_COLLECTION) {
@@ -695,7 +695,9 @@ static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned
 
 	ret->nameLen = slen;
 
-	bsIndexPut(dict, ret);
+	if(!(dict->flags & BS_NOINDEX)) {
+	    bsIndexPut(dict, ret);
+	}
 
 	LL_APPEND_DYNAMIC(parent, ret);
 	parent->childCount++;
@@ -740,8 +742,8 @@ BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, cons
 
 	return _bsCreateNode(dict, parent, type, NULL, 0);
 
-    } 
-    
+    }
+
     if(name == NULL || ((slen = strlen(name)) == 0)) {
 	xmalloc(out, 1);
     } else {
@@ -759,25 +761,43 @@ BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, cons
 /* [get|check if] parent node has a child with specified name */
 static inline BsNode* getNodeChild(BsDict* dict, BsNode *parent, const char* name, const size_t namelen) {
 
+    uint32_t hash;
+    BsNode* n;
+    LList *l;
+    LListMember *m;
+
     if(name != NULL && namelen > 0) {
 
-	LList *l = bsIndexGet(dict->index, BS_MIX_HASH(xxHash32(name, namelen), parent->hash, namelen));
+	hash = BS_MIX_HASH(xxHash32(name, namelen), parent->hash, namelen);
 
-	if(l != NULL) {
+	/* grab node from index if we can */
+	if(!(dict->flags & BS_NOINDEX)) {
 
-	    LListMember *m;
-	    BsNode* n;
+	    l = bsIndexGet(dict->index, hash);
 
-	    LL_FOREACH_DYNAMIC(l, m) {
+	    if(l != NULL) {
 
-		n = m->value;
-		if(n != NULL && n->parent == parent) {
-		    return n;
+		LL_FOREACH_DYNAMIC(l, m) {
+
+		    n = m->value;
+		    if(n != NULL && n->parent == parent) {
+			return n;
+		    }
+
 		}
 
 	    }
+	/* otherwise do a naive search */
+	} else {
 
+	    LL_FOREACH_DYNAMIC(parent, n) {
+		if(n->hash == hash && n->nameLen == namelen && !strncmp(name, n->name, namelen)) {
+		    return n;
+		}
+	    }
+	
 	}
+
     }
 
     return NULL;
@@ -793,7 +813,9 @@ unsigned int bsDeleteNode(BsDict *dict, BsNode *node)
     }
 
     /* remove node from index */
-    bsIndexDelete(dict->index, node);
+    if(!(dict->flags & BS_NOINDEX)) {
+	bsIndexDelete(dict->index, node);
+    }
 
     /* remove all children recursively first */
     for ( BsNode *child = node->_firstChild; child != NULL; child = node->_firstChild) {
@@ -813,7 +835,7 @@ unsigned int bsDeleteNode(BsDict *dict, BsNode *node)
 }
 
 /* create a (named) dictionary */
-BsDict* bsCreate(const char *name) {
+BsDict* bsCreate(const char *name, const uint32_t flags) {
 
     size_t slen = 0;
     BsDict *ret;
@@ -831,14 +853,19 @@ BsDict* bsCreate(const char *name) {
 
     *(ret->name + slen) = '\0';
 
+    /* set flags */
+    ret->flags = flags;
+
     /* create the root node */
     _bsCreateNode(ret, NULL, BS_NODE_ROOT,NULL,0);
 
     /* create the index */
-    ret->index = bsIndexCreate();
-    if(ret->index == NULL) {
-	bsFree(ret);
-	return NULL;
+    if(!(flags & BS_NOINDEX)) {
+	ret->index = bsIndexCreate();
+	if(ret->index == NULL) {
+	    bsFree(ret);
+	    return NULL;
+	}
     }
 
     return ret;
@@ -860,7 +887,7 @@ void bsFree(BsDict *dict) {
 	free(dict->name);
     }
 
-    if(dict->index != NULL) {
+    if(!(dict->flags & BS_NOINDEX) && dict->index != NULL) {
 	bsIndexFree(dict->index);
     }
 
@@ -981,9 +1008,13 @@ finalise:
 static void* bsRehashCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* cont) {
 
     if(node->parent != NULL) {
-	bsIndexDelete(dict->index, node);
+	if(!(dict->flags & BS_NOINDEX)) {
+	    bsIndexDelete(dict->index, node);
+	}
 	node->hash = BS_MIX_HASH(xxHash32(node->name, node->nameLen), node->parent->hash, node->nameLen);
-	bsIndexPut(dict, node);
+	if(!(dict->flags & BS_NOINDEX)) {
+	    bsIndexPut(dict, node);
+	}
     }
 
     return NULL;
@@ -1267,7 +1298,7 @@ static inline void bsScan(BsState *state) {
 	}
 
 	/* if no event raised, check for control characters, raise parser events and move search state accordingly */
-	if(state->parseEvent == BS_NONE) {
+	if(state->parseEvent == BS_NOEVENT) {
 
 	    switch(c) {
 #ifdef BS_QUOTE1_CHAR
@@ -1354,7 +1385,7 @@ static inline void bsScan(BsState *state) {
 	    }
 	}
 
-    } while(state->parseEvent == BS_NONE);
+    } while(state->parseEvent == BS_NOEVENT);
 
     return;
 }
@@ -1387,7 +1418,7 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
     /* keep parsing until no more data or parser error encountered */
     while(!state.parseError) {
 
-	state.parseEvent = BS_NONE;
+	state.parseEvent = BS_NOEVENT;
 	state.parseError = BS_PERROR_NONE;
 
 	/* scan state machine runs until it barfs an event */
@@ -1777,7 +1808,7 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 		}
 		/* all she wrote */
 		goto done;
-	    case BS_NONE:
+	    case BS_NOEVENT:
 	    case BS_ERROR:
 	    default:
 		break;
@@ -1810,32 +1841,32 @@ done:
  */
 size_t bsGetPath(BsNode *node, char* out, const size_t outlen) {
 
-    size_t pathlen = 0;
-    char* target = out + outlen;
+    size_t pathlen = 1;
+    char* target = out + outlen - 1;
 
     if(node == NULL) {
-	return 0;
+	return 1;
     }
 
-    for(BsNode *walker = node; walker != NULL; walker = walker->parent) {
+    for(BsNode *walker = node; walker->parent != NULL; walker = walker->parent) {
 
-	pathlen += walker->nameLen + 1;
+	pathlen += walker->nameLen;
+	if(walker->parent->parent != NULL) {
+	    pathlen++;
+	}
 
 	if(out != NULL) {
 	    target -= walker->nameLen;
 	    memcpy(target, walker->name, walker->nameLen);
-	    if(walker->parent != NULL && walker->parent->parent != NULL) {
+	    if(walker->parent->parent != NULL) {
 		target--;
 		*target = BS_PATH_SEP;
 	    }
 	}
-
     }
 
-    /* because there is no leading '/' for root itself and for the first element. */
-    pathlen -= 2;
     if(out != NULL) {
-	out[pathlen] = '\0';
+	out[pathlen - 1] = '\0';
     }
 
     return pathlen;
@@ -1879,14 +1910,21 @@ static inline size_t cleanupQuery(char* query) {
 /* return a new string containing cleaned up query */
 static inline char* getCleanQuery(const char* query) {
 
-    size_t sl = strlen(query);
     char* cqry;
-    xmalloc(cqry, sl);
+    size_t sl;
+
+    if(query == NULL || (sl = strlen(query)) == 0) {
+	xmalloc(cqry, 1);
+	cqry[0] = '\0';
+	return cqry;
+    }
+
+    xmalloc(cqry, sl + 1);
 
     memcpy(cqry, query, sl);
     cqry[sl] = '\0';
     cleanupQuery(cqry);
-    return cqry;	
+    return cqry;
 
 }
 
@@ -1918,24 +1956,50 @@ static inline uint32_t bsGetPathHash(BsNode* root, const char* query) {
 /* find a descendant of node based on path, and verify that path matches */
 BsNode* bsNodeGet(BsDict* dict, BsNode *node, const char* qry) {
 
+    BsToken tok;
+    uint32_t hash;
+    BsNode *current = node;
+    char* cqry;
+    char *marker;
+
     if(qry != NULL) {
 
-        char* cqry = getCleanQuery(qry);
-
+	hash = bsGetPathHash(node, qry);
+        cqry = getCleanQuery(qry);
 	if(cqry != NULL) {
 
-	    LList* l =  bsIndexGet(dict->index, bsGetPathHash(node, qry));
-	    LListMember *m;
+	    /* if the dictionary is indexed, search in index */
+	    if(!(dict->flags & BS_NOINDEX)) {
 
-	    LL_FOREACH_DYNAMIC(l, m) {
+		LList* l =  bsIndexGet(dict->index, hash);
+		if(l != NULL) {
+		    LListMember *m;
+		    LL_FOREACH_DYNAMIC(l, m) {
 
-		BsNode* n = m->value;
-		BS_GETNP(n, path);
+			current = m->value;
 
-		if(!strcmp(cqry, path)) {
-		    free(cqry);
-		    return n;
+			BS_GETNP(current, path);
+			if(!strcmp(cqry, path)) {
+			    free(cqry);
+			    return current;
+			}
+
+		    }
 		}
+	    /* otherwise do a naive search */
+	    } else {
+
+		marker = cqry;
+		/* iterate over tokens, moving down the tree as we find children token by token */
+		while((current != NULL) && unescapeToken(&tok, &marker, BS_PATH_SEP)) {
+
+		    current = getNodeChild(dict, current, tok.data, tok.len);
+		    free(tok.data);
+
+		}
+
+		free(cqry);
+		return current;
 
 	    }
 
@@ -2009,10 +2073,9 @@ static void *bsDupCallback(BsDict *dict, BsNode *node, void* user, void* feedbac
 }
 
 /* duplicate a dictionary, give new name to resulting dictionary */
-BsDict* bsDuplicate(BsDict *source, const char* newname) {
+BsDict* bsDuplicate(BsDict *source, const char* newname, const uint32_t newflags) {
 
-    BsDict* dest = bsCreate(newname);
-
+    BsDict* dest = bsCreate(newname, newflags);
 
     if(dest == NULL) {
 	return NULL;

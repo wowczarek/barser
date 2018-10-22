@@ -211,9 +211,16 @@ struct BsNode {
 
 };
 
+/* dictionary flags */
+#define BS_NONE		0		/* also a universal zero constant */
+#define BS_NOINDEX	(1<<0)		/* this dictionary instance does not index nodes */
+#define BS_READONLY	(1<<1)		/* this dictionary becomes read-only once parsed */
+
 /* node flags */
-#define BS_QUOTED_VALUE (1<<0)
-#define BS_QUOTED_NAME  (1<<1)
+#define BS_QUOTED_VALUE (1<<0)		/* node name was specified as quoted string */
+#define BS_QUOTED_NAME  (1<<1)		/* node value was specified as quoted string */
+#define BS_INDEXED	(1<<2)		/* node was indexed */
+
 
 /* the dictionary */
 struct BsDict {
@@ -225,6 +232,7 @@ struct BsDict {
     int maxcoll;		/* maximum collisions to same entry */
 #endif /* COLL_DEBUG */
     size_t nodecount;		/* total node count. */
+    uint32_t flags;		/* dictionary flags */
 };
 
 /*
@@ -247,7 +255,7 @@ typedef void* (*BsCallback) (BsDict*, BsNode*, void*, void*, bool*);
 size_t getFileBuf(char **buf, const char *fileName);
 
 /* create and initialise a dictionary */
-BsDict *bsCreate(const char *name);
+BsDict *bsCreate(const char *name, const uint32_t flags);
 
 /* create new node in dictionary, attached to parent, of type type with name name */
 BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, const char* name);
@@ -256,7 +264,7 @@ BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, cons
 void bsFree(BsDict *dict);
 
 /* duplicate a dictionary, give new name to resulting dictionary */
-BsDict* bsDuplicate(BsDict *source, const char* newname);
+BsDict* bsDuplicate(BsDict *source, const char* newname, const uint32_t newflags);
 
 /* parse contents of a char buffer */
 BsState bsParse(BsDict *dict, char *buf, size_t len);
