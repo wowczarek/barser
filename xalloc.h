@@ -49,19 +49,19 @@
 #endif /* xallocfail */
 
 #ifndef xmalloc
-#define xmalloc(var, size) ((var = malloc(size)) == NULL ? xallocfail("malloc") : var)
+#define xmalloc(var, size) ((((var) = malloc(size)) == NULL) ? xallocfail("malloc") : var)
 #endif /* xmalloc */
 
 #ifndef xcalloc
-#define xcalloc(var, n, size) ((var = calloc(n, size)) == NULL ? xallocfail("calloc") : var)
+#define xcalloc(var, n, size) ((((var) = calloc(n, size)) == NULL) ? xallocfail("calloc") : var)
 #endif /* xcalloc */
 
 #ifndef xrealloc
-#define xrealloc(var, ptr, size) ((var = realloc(ptr, size)) == NULL ? xallocfail("realloc") : var)
+#define xrealloc(var, ptr, size) ((((var) = realloc(ptr, size)) == NULL) ? xallocfail("realloc") : var)
 #endif /* xrealloc */
 
 #ifndef xfree
-#define xfree(var) (void)(var = (var != NULL) ? free(var), NULL : NULL)
+#define xfree(var) (void)((var) = (((var) != NULL) ? (free(var), NULL) : NULL))
 #endif /* xfree */
 
 #endif /* XALLOC_H_ */
