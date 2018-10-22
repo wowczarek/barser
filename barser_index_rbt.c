@@ -99,8 +99,9 @@ void bsIndexPut(BsDict *dict, BsNode* node) {
 #endif /* COLL_DEBUG */
 
 	llAppendItem(inode->value, node);
+	node->flags |= BS_INDEXED;
 
-//    } 
+//    }
 
 }
 

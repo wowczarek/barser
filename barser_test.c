@@ -44,8 +44,7 @@
 #include <unistd.h>
 #include <time.h>
 
-#include "xxh.h"
-
+#include "xalloc.h"
 #include "barser.h"
 
 /* basic duration measurement macros */
@@ -55,7 +54,55 @@
 #define DUR_PRINT(name, msg) fprintf(stderr, "%s: %llu ns\n", msg, name##_delta);
 #define DUR_EPRINT(name, msg) DUR_END(name); fprintf(stderr, "%s: %llu ns\n", msg, name##_delta);
 
-#include "itoa.h"
+#define QUERYCOUNT 10000
+
+struct sample {
+    BsNode* node;
+    bool required;
+};
+
+/* generate a Fisher-Yates shuffled array of n uint32s */
+static uint32_t* randArrayU32(const int count) {
+
+    int i;
+    struct timeval t;
+
+    /* good idea oh Lord */
+    gettimeofday(&t, NULL);
+    /* of course it's a good idea! */
+    srand(t.tv_sec + t.tv_usec);
+
+    uint32_t* ret;
+    xmalloc(ret, count * sizeof(uint32_t));
+
+    for(i = 0; i < count; i++) {
+	ret[i] = i;
+    }
+
+    for(i = 0; i < count; i++) {
+	uint32_t j = i + rand() % (count - i);
+	uint32_t tmp = ret[j];
+	ret[j] = ret[i];
+	ret[i] = tmp;
+    }
+
+    return ret;
+}
+
+static void* countcb(BsDict *dict, BsNode *node, void* user, void* feedback, bool* cont) {
+
+    uint32_t* counter = user;
+    struct sample* samples = feedback;
+
+    if(samples[*counter].required) {
+	samples[*counter].node = node;
+    }
+
+    *counter = *counter + 1;
+
+    return samples;
+
+}
 
 int main(int argc, char **argv) {
 
@@ -75,7 +122,8 @@ int main(int argc, char **argv) {
 
     }
 
-    BsDict *dict = bsCreate("test");
+//    BsDict *dict = bsCreate("test", BS_NOINDEX);
+    BsDict *dict = bsCreate("test", BS_NONE);
 
     fprintf(stderr, "Loading \"%s\" into memory... ", argv[1]);
     fflush(stderr);
@@ -128,25 +176,100 @@ int main(int argc, char **argv) {
     }
 
     if(qry != NULL) {
+	fprintf(stderr, "Testing single fetch of \"%s\" from dictionary...", qry);
+	fflush(stderr);
+	DUR_START(test);
 	BsNode* node = bsGet(dict, qry);
+	DUR_END(test);
+	fprintf(stderr, "done.\n");
+	fprintf(stderr, "Single / first fetch took %llu ns\n", test_delta);
+
+
+
 	if(node != NULL) {
-	    printf("Node found, hash of query \"%s\" is: 0x%08x, node name \"%s\":\n", qry, node->hash, node->name);
+	    fprintf(stderr, "\nNode found, hash of path \"%s\" is: 0x%08x, node name \"%s\":\n\n", qry, node->hash, node->name);
 	    bsDumpNode(stdout, node);
+	    printf("\n");
 	} else {
-	    printf("Nothing found for query \"%s\"\n", qry);
+	    fprintf(stderr, "\nNothing found for path \"%s\"\n\n", qry);
 	    ret = 2;
 	}
-    }
 
-    fprintf(stderr, "Duplicating dictionary... ");
-    fflush(stderr);
-    DUR_START(test);
-    BsDict* dup = bsDuplicate(dict, "newdict");
-    DUR_END(test);
+	uint32_t querycount = min(QUERYCOUNT, dict->nodecount);
 
-    fprintf(stderr, "done.\n");
-    fprintf(stderr, "Duplicated in %llu ns, %zu nodes, %.0f nodes/s\n",
+	struct sample* samples;
+	xcalloc(samples, dict->nodecount, sizeof(struct sample));
+	char* paths[querycount];
+
+	fprintf(stderr, "Extracting random %d nodes... ", querycount);
+
+	uint32_t* sarr = randArrayU32(dict->nodecount);
+
+	for(int i = 0; i < querycount; i++) {
+	    samples[sarr[i]].required = true;
+	}
+
+	uint32_t  n = 0;
+	bsNodeWalk(dict, dict->root, &n, samples, countcb);
+
+	for(int i = 0; i < querycount; i++) {
+	    if(samples[sarr[i]].node != NULL) {
+		size_t pl = bsGetPath(samples[sarr[i]].node, NULL, 0);
+		xmalloc(paths[i], pl);
+		bsGetPath(samples[sarr[i]].node, paths[i], pl);
+	    }
+	}
+
+	fprintf(stderr, "done.\n");
+
+	fprintf(stderr, "Getting %d random paths from dictionary... ", querycount);
+	fflush(stderr);
+	int found = 0;
+	DUR_START(test);
+	for(int i = 0; i< querycount; i++) {
+	    node = bsGet(dict, paths[i]);
+	    if(node != NULL) {
+		found++;
+	    }
+	}
+	DUR_END(test);
+	fprintf(stderr, "done.\n");
+	fprintf(stderr, "Found %d out of %d, average fetch time %llu ns per query\n", found, querycount, test_delta / querycount);
+
+	fprintf(stderr, "Freeing test data... ");
+	fflush(stderr);
+
+	for(int i = 0; i< querycount; i++) {
+	    free(paths[i]);
+	}
+	free(samples);
+	free(sarr);
+	fprintf(stderr, "done.\n");
+
+    /* no query given - test duplication */
+    } else {
+
+	fprintf(stderr, "Duplicating dictionary... ");
+	fflush(stderr);
+	DUR_START(test);
+	BsDict* dup = bsDuplicate(dict, "newdict", dict->flags);
+	DUR_END(test);
+
+	fprintf(stderr, "done.\n");
+	fprintf(stderr, "Duplicated in %llu ns, %zu nodes, %.0f nodes/s\n",
 		test_delta, nodecount, (1000000000.0 / test_delta) * dup->nodecount);
+
+	fprintf(stderr, "Freeing duplicate... ");
+	fflush(stderr);
+
+	DUR_START(test);
+	bsFree(dup);
+	DUR_END(test);
+
+	fprintf(stderr, "done.\n");
+	fprintf(stderr, "Freed in %llu ns, %zu nodes, %.0f nodes/s\n",
+		test_delta, nodecount, (1000000000.0 / test_delta) * nodecount);
+    }
 
     fprintf(stderr, "Freeing dictionary... ");
     fflush(stderr);
@@ -159,16 +282,6 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Freed in %llu ns, %zu nodes, %.0f nodes/s\n",
 		test_delta, nodecount, (1000000000.0 / test_delta) * nodecount);
 
-    fprintf(stderr, "Freeing duplicate... ");
-    fflush(stderr);
-
-    DUR_START(test);
-    bsFree(dup);
-    DUR_END(test);
-
-    fprintf(stderr, "done.\n");
-    fprintf(stderr, "Freed in %llu ns, %zu nodes, %.0f nodes/s\n",
-		test_delta, nodecount, (1000000000.0 / test_delta) * nodecount);
 
     free(buf);
 
