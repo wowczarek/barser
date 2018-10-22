@@ -41,6 +41,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "xalloc.h"
 #include "rbt/st_inline.h"
 #include "xxh.h"
 #include "itoa.h"
@@ -189,24 +190,20 @@ static inline char* getTokenData(BsToken *token) {
      */
     if(token->quoted) {
 
-	out = realloc(token->data, token->len + 1);
+	xrealloc(out, token->data, token->len + 1);
 	/* this way we know this has been used, so we will not attempt to free it */
 	token->data = NULL;
 
     /* otherwise token->data is in an existing buffer, so we duplicate */
     } else {
 
-	out = malloc(token->len + 1);
-	if(out != NULL) {
-	    memcpy(out, token->data, token->len);
-	}
+	xmalloc(out, token->len + 1);
+	memcpy(out, token->data, token->len);
 
     }
 
     /* good boy! */
-    if(out != NULL) {
-	out[token->len] = '\0';
-    }
+    out[token->len] = '\0';
 
     return out;
 
@@ -275,7 +272,7 @@ size_t getFileBuf(char **out, const char *fileName) {
 
 	size_t bufsize = BS_STDIN_BLKSIZE;
 
-	buf = malloc(bufsize + 1);
+	xmalloc(buf, bufsize + 1);
 	if(buf == NULL) {
 	    goto failure;
 	}
@@ -288,15 +285,11 @@ size_t getFileBuf(char **out, const char *fileName) {
 	    /* if we got less than block size, we have probably reached the end */
 	    if(got < BS_STDIN_BLKSIZE) {
 		/* shrink to fit */
-		buf = realloc(buf, size + 1);
+		xrealloc(buf, buf, size + 1);
 	    /* otherwise grow, realloc */
 	    } else if(size == bufsize) {
 		bufsize += BS_STDIN_BLKEXTENT * BS_STDIN_BLKSIZE;
-		buf = realloc(buf, bufsize + 1);
-	    }
-
-	    if(buf == NULL) {
-		goto failure;
+		xrealloc(buf, buf, bufsize + 1);
 	    }
 
 	}
@@ -310,9 +303,7 @@ size_t getFileBuf(char **out, const char *fileName) {
 
 	rewind(fl);
 
-	if ((buf = malloc(size + 1)) == NULL) {
-	    goto failure;
-	}
+	xmalloc(buf, size + 1);
 
 	size_t ret = fread(buf, 1, size, fl);
 
@@ -661,7 +652,7 @@ static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned
 	return NULL;
     }
 
-    ret = malloc(sizeof(BsNode));
+    xmalloc(ret, sizeof(BsNode));
 
     if(ret == NULL) {
 	return NULL;
@@ -677,7 +668,9 @@ static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned
     ret->nameLen = 0;
     ret->_firstChild = ret->_lastChild = ret->_next = ret->_prev = NULL;
     ret->_first = NULL;
+#ifdef COLL_DEBUG
     ret->collcount = 0;
+#endif /* COLL_DEBUG */
     if(parent != NULL) {
 
 	/* if we are adding an array member, call it by number, ignoring the name */
@@ -686,10 +679,7 @@ static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned
 	    /* major win over snprintf, 30% total performance difference for citylots.json */
 	    char* endname = u32toa(numname, parent->childCount);
 	    slen = endname - numname;
-	    ret->name = malloc(slen + 1);
-	    if(ret->name == NULL) {
-		goto onerror;
-	    }
+	    xmalloc(ret->name, slen + 1);
 	    memcpy(ret->name, numname, slen);
 	} else {
 	    if(name == NULL) {
@@ -718,10 +708,8 @@ static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned
 	} else {
 	    dict->root = ret;
 	    ret->type = BS_NODE_ROOT;
-	    ret->name = malloc(1);
-	    if(ret->name != NULL) {
-		ret->name[0] = '\0';
-	    }
+	    xmalloc(ret->name, 1);
+	    ret->name[0] = '\0';
 	    ret->hash = BS_ROOT_HASH;
 	}
 
@@ -746,32 +734,26 @@ onerror:
  */
 BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, const char* name) {
 
-    char* out;
+    char* out = NULL;
     size_t slen = 0;
     if(parent != NULL && parent->type == BS_NODE_ARRAY) {
 
 	return _bsCreateNode(dict, parent, type, NULL, 0);
 
+    } 
+    
+    if(name == NULL || ((slen = strlen(name)) == 0)) {
+	xmalloc(out, 1);
     } else {
-
-	if(name == NULL || ((slen = strlen(name)) == 0)) {
-	    out = malloc(1);
-	    if(out == NULL) {
-		return NULL;
-	    }
-	} else {
-	    slen = strlen(name);
-	    out = malloc(slen + 1);
-	    if(out == NULL) {
-		return NULL;
-	    }
-	    memcpy(out, name, slen);
-	}
-
-	*(out + slen) = '\0';
-
-	return _bsCreateNode(dict, parent, type, out, slen);
+        slen = strlen(name);
+        xmalloc(out, slen + 1);
+        memcpy(out, name, slen);
     }
+
+    *(out + slen) = '\0';
+
+    return _bsCreateNode(dict, parent, type, out, slen);
+
 }
 
 /* [get|check if] parent node has a child with specified name */
@@ -834,25 +816,16 @@ unsigned int bsDeleteNode(BsDict *dict, BsNode *node)
 BsDict* bsCreate(const char *name) {
 
     size_t slen = 0;
+    BsDict *ret;
 
-    BsDict *ret = calloc(1, sizeof(BsDict));
-    if(ret == NULL) {
-	return NULL;
-    }
+    xcalloc(ret, 1, sizeof(BsDict));
 
     /* because no strdup() */
     if(name == NULL || ((slen = strlen(name)) == 0)) {
-	ret->name = malloc(1);
-	if(ret->name == NULL) {
-	    free(ret);
-	    return NULL;
-	}
+	xmalloc(ret->name, 1);
+	ret->name[0] = '\0';
     } else {
-	ret->name = malloc(slen + 1);
-	if(ret->name == NULL) {
-	    free(ret);
-	    return NULL;
-	}
+	xmalloc(ret->name, slen + 1);
 	memcpy(ret->name, name, slen);
     }
 
@@ -953,11 +926,7 @@ static inline BsToken* unescapeToken(BsToken* out, char** in, const char sep) {
     }
 
     out->len = 0;
-    out->data = malloc(ssize + 1);
-
-    if(out->data == NULL) {
-	goto failure;
-    }
+    xmalloc(out->data, ssize + 1);
 
     /* keep scanning */
     while(((c = **in) != sep) && c != '\0') {
@@ -992,10 +961,7 @@ static inline BsToken* unescapeToken(BsToken* out, char** in, const char sep) {
 	/* grow - we do not bother shrinking to fit, these are usually short-lived and used for hashing */
 	if(out->len == ssize) {
 	    ssize *= 2;
-	    out->data = realloc(out->data, ssize + 1);
-	    if(out->data == NULL) {
-		goto failure;
-	    }
+	    xrealloc(out->data, out->data, ssize + 1);
 	}
 
     }
@@ -1008,12 +974,6 @@ finalise:
 
     out->data[out->len] = '\0';
     return out;
-
-failure:
-
-    out->len = 0;
-    free(out->data);
-    return NULL;
 
 }
 
@@ -1227,10 +1187,7 @@ static inline void bsScan(BsState *state) {
 		ssize = BS_QUOTED_STARTSIZE;
 		tok->len = 0;
 		tok->quoted = ~0;
-		tok->data = malloc(ssize + 1);
-		if(tok->data == NULL) {
-		    goto failure;
-		}
+		xmalloc(tok->data, ssize + 1);
 		bool captured;
 		while(c != qchar) {
 
@@ -1258,10 +1215,7 @@ static inline void bsScan(BsState *state) {
 		    tok->len++;
 		    if(tok->len == ssize) {
 			ssize *= 2;
-			tok->data = realloc(tok->data, ssize + 1);
-			if(tok->data == NULL) {
-			    goto failure;
-			}
+			xrealloc(tok->data, tok->data, ssize + 1);
 		    }
 		}
 		c = bsForward(state);
@@ -1403,14 +1357,6 @@ static inline void bsScan(BsState *state) {
     } while(state->parseEvent == BS_NONE);
 
     return;
-
-failure:
-
-    state->parseEvent = BS_ERROR;
-    state->parseError = BS_PERROR;
-
-    return;
-
 }
 
 /*
@@ -1934,16 +1880,14 @@ static inline size_t cleanupQuery(char* query) {
 static inline char* getCleanQuery(const char* query) {
 
     size_t sl = strlen(query);
-    char* cqry = malloc(sl);
+    char* cqry;
+    xmalloc(cqry, sl);
 
-    if(cqry != NULL) {
-	memcpy(cqry, query, sl);
-	cqry[sl] = '\0';
-	cleanupQuery(cqry);
-	return cqry;	
-    }
+    memcpy(cqry, query, sl);
+    cqry[sl] = '\0';
+    cleanupQuery(cqry);
+    return cqry;	
 
-    return NULL;
 }
 
 /* compute the compound hash of a query path rooted ad node @root */
@@ -2054,11 +1998,9 @@ static void *bsDupCallback(BsDict *dict, BsNode *node, void* user, void* feedbac
 	/* duplicate value */
 	if(node->type == BS_NODE_LEAF && node->value != NULL) {
 	    size_t vlen = strlen(node->value);
-	    newnode->value = malloc(vlen + 1);
-	    if(newnode->value != NULL) {
-		memcpy(newnode->value, node->value, vlen);
-		newnode->value[vlen] = '\0';
-	    }
+	    xmalloc(newnode->value, vlen + 1);
+	    memcpy(newnode->value, node->value, vlen);
+	    newnode->value[vlen] = '\0';
 	}
     }
 

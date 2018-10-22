@@ -75,27 +75,32 @@ void bsIndexPut(BsDict *dict, BsNode* node) {
 
     RbNode* inode = rbInsert((RbTree*)(dict->index), node->hash);
 
-    if(inode != NULL && inode->value != NULL) {
+#ifdef TODO_CHECK
+#error todo: index is created with prealloc, so this is unnecessary
+#endif
+//    if(inode != NULL && inode->value != NULL) {
 
+#ifdef COLL_DEBUG
 	LList *l = inode->value;
-
 	if(!llisEmpty(l)) {
+	    #include <stdio.h>
 	    BsNode* n = l->_firstChild->value;
 	    BS_GETNP(n, p1);
 	    BS_GETNP(node, p2);
-	    #ifdef COLL_DEBUG
-	    #include <stdio.h>
-	    printf("'%s' and '%s' share hash 0x%08x\n", p1, p2, node->hash);
-	    #endif
+	    fprintf(stderr, "*** hash collision: '%s' and '%s' share hash 0x%08x\n", p1, p2, node->hash);
 	    dict->collcount++;
+	    /*
+	     * collision count is maintained in the first node in list,
+	     * this is enough for simple hash collision tracking.
+	     */
 	    n->collcount++;
 	    dict->maxcoll = max(dict->maxcoll, n->collcount);
-
 	}
+#endif /* COLL_DEBUG */
 
-	llAppendItem(l, node);
+	llAppendItem(inode->value, node);
 
-    } 
+//    } 
 
 }
 

@@ -205,7 +205,10 @@ struct BsNode {
     unsigned int type;			/* node type enum */
     unsigned int flags;			/* flags - quoted name, quoted value, etc. */
 
+#ifdef COLL_DEBUG
     int collcount;			/* temporary, for collision monitoring */
+#endif /* COLL_DEBUG */
+
 };
 
 /* node flags */
@@ -217,8 +220,10 @@ struct BsDict {
     BsNode *root;		/* root node */
     char *name;			/* well, a name */
     void *index;		/* abstract index */
+#ifdef COLL_DEBUG
     int collcount;		/* collision count */
     int maxcoll;		/* maximum collisions to same entry */
+#endif /* COLL_DEBUG */
     size_t nodecount;		/* total node count. */
 };
 
@@ -261,8 +266,12 @@ void bsPrintError(BsState *state);
 
 /* run a callback recursively on node, return node where callback stopped the walk */
 BsNode* bsNodeWalk(BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback);
+/* run a callback recursively on node, passing the node's whole path as feedback on every run */
+BsNode* bsNodePWalk(BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback);
 /* run a callback recursively on dictionary, return node where callback stopped the walk */
 BsNode* bsWalk(BsDict *dict, void* user, BsCallback callback);
+/* same, with path passed as feedback */
+BsNode* bsPWalk(BsDict *dict, void* user, BsCallback callback);
 
 /* output dictionary contents to file */
 void bsDump(FILE* fl, BsDict *dict);

@@ -105,7 +105,9 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Parsed in %llu ns, %.03f MB/s, %zu nodes, %.0f nodes/s\n",
 		test_delta, (1000000000.0 / test_delta) * (len / 1000000.0),
 		dict->nodecount, (1000000000.0 / test_delta) * dict->nodecount);
+#ifdef COLL_DEBUG
     fprintf(stderr, "Total index collisions %d, max per node %d\n", dict->collcount, dict->maxcoll);
+#endif /* COLL_DEBUG */
     nodecount = dict->nodecount;
 
     if(state.parseError) {

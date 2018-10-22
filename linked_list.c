@@ -35,19 +35,19 @@
 
 #include <stdlib.h>
 
+#include "xalloc.h"
 #include "linked_list.h"
 
 /* create a linked list member */
 static inline LListMember* llCreateMember() {
 
-    LListMember* out = malloc(sizeof(LListMember));
+    LListMember* out;
+    xmalloc(out, sizeof(LListMember));
 
-    if(out != NULL) {
-	out->_prev = NULL;
-	out->_next = NULL;
-	out->_first = NULL;
-	return out;
-    }
+    out->_prev = NULL;
+    out->_next = NULL;
+    out->_first = NULL;
+    return out;
 
     return NULL;
 
@@ -56,15 +56,12 @@ static inline LListMember* llCreateMember() {
 /* create a linked list */
 LList* llCreate() {
 
-    LList* out = malloc(sizeof(LList));
+    LList* out;
+    xmalloc(out, sizeof(LList));
 
-    if(out != NULL) {
-	out->_firstChild = NULL;
-	out->_lastChild = NULL;
-	return out;
-    }
-
-    return NULL;
+    out->_firstChild = NULL;
+    out->_lastChild = NULL;
+    return out;
 
 }
 
