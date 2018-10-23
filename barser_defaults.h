@@ -79,11 +79,12 @@
 #define BF_TOK		(1<<0)	/* legal part of a token */
 #define BF_EXT		(1<<1)	/* extended token characters (used in second and further tokens) */
 #define BF_CTL		(1<<2)	/* control characters */
-#define BF_SPC		(1<<3)	/* whitespace characters */
+#define BF_SPC		(1<<3)	/* characters treated as whitespace - skipped in token search*/
 #define BF_NLN		(1<<4)	/* newline characters */
 #define BF_ILL		(1<<5)	/* illegal characters */
 #define BF_ESC		(1<<6)	/* escapable characters */
 #define BF_ESS		(1<<7)	/* escape sequences */
+#define BF_WSP		(1<<8)	/* proper whitespace characters */
 
 /*
  * Static character to class mappings. a character can belong to multiple classes,
@@ -94,7 +95,7 @@
  * is only meant to be included by barser.h, so, you know.
  */
 
-static const unsigned char chflags[256] = {
+static const uint16_t chflags[256] = {
 
     [  0] = BF_CTL | BF_NON /* NUL */, [ 64] = BF_TOK | BF_NON /* @   */, [128] = BF_ILL | BF_NON, [192] = BF_ILL | BF_NON,
     [  1] = BF_ILL | BF_NON /* SOH */, [ 65] = BF_TOK | BF_NON /* A   */, [129] = BF_ILL | BF_NON, [193] = BF_ILL | BF_NON,
@@ -105,11 +106,11 @@ static const unsigned char chflags[256] = {
     [  6] = BF_ILL | BF_NON /* ACK */, [ 70] = BF_TOK | BF_NON /* F   */, [134] = BF_ILL | BF_NON, [198] = BF_ILL | BF_NON,
     [  7] = BF_ILL | BF_NON /* BEL */, [ 71] = BF_TOK | BF_NON /* G   */, [135] = BF_ILL | BF_NON, [199] = BF_ILL | BF_NON,
     [  8] = BF_ILL | BF_ESC /* BS  */, [ 72] = BF_TOK | BF_NON /* H   */, [136] = BF_ILL | BF_NON, [200] = BF_ILL | BF_NON,
-    [  9] = BF_SPC | BF_ESC /* TAB */, [ 73] = BF_TOK | BF_NON /* I   */, [137] = BF_ILL | BF_NON, [201] = BF_ILL | BF_NON,
-    [ 10] = BF_NLN | BF_ESC /* LF  */, [ 74] = BF_TOK | BF_NON /* J   */, [138] = BF_ILL | BF_NON, [202] = BF_ILL | BF_NON,
+    [  9] =BF_SPC|BF_ESC|BF_WSP/*TAB*/,[ 73] = BF_TOK | BF_NON /* I   */, [137] = BF_ILL | BF_NON, [201] = BF_ILL | BF_NON,
+    [ 10] =BF_NLN|BF_ESC|BF_WSP/*LF */,[ 74] = BF_TOK | BF_NON /* J   */, [138] = BF_ILL | BF_NON, [202] = BF_ILL | BF_NON,
     [ 11] = BF_ILL | BF_NON /* VT  */, [ 75] = BF_TOK | BF_NON /* K   */, [139] = BF_ILL | BF_NON, [203] = BF_ILL | BF_NON,
     [ 12] = BF_ILL | BF_ESC /* FF  */, [ 76] = BF_TOK | BF_NON /* L   */, [140] = BF_ILL | BF_NON, [204] = BF_ILL | BF_NON,
-    [ 13] = BF_NLN | BF_ESC /* CR  */, [ 77] = BF_TOK | BF_NON /* M   */, [141] = BF_ILL | BF_NON, [205] = BF_ILL | BF_NON,
+    [ 13] =BF_NLN|BF_ESC|BF_WSP/*CR*/, [ 77] = BF_TOK | BF_NON /* M   */, [141] = BF_ILL | BF_NON, [205] = BF_ILL | BF_NON,
     [ 14] = BF_ILL | BF_NON /* SO  */, [ 78] = BF_TOK | BF_NON /* N   */, [142] = BF_ILL | BF_NON, [206] = BF_ILL | BF_NON,
     [ 15] = BF_ILL | BF_NON /* SI  */, [ 79] = BF_TOK | BF_NON /* O   */, [143] = BF_ILL | BF_NON, [207] = BF_ILL | BF_NON,
     [ 16] = BF_ILL | BF_NON /* DLE */, [ 80] = BF_TOK | BF_NON /* P   */, [144] = BF_ILL | BF_NON, [208] = BF_ILL | BF_NON,
@@ -128,11 +129,11 @@ static const unsigned char chflags[256] = {
     [ 29] = BF_ILL | BF_NON /* GS  */, [ 93] =BF_CTL|BF_ESC|BF_ESS/*] */, [157] = BF_ILL | BF_NON, [221] = BF_ILL | BF_NON,
     [ 30] = BF_ILL | BF_NON /* RS  */, [ 94] = BF_TOK | BF_NON /* ^   */, [158] = BF_ILL | BF_NON, [222] = BF_ILL | BF_NON,
     [ 31] = BF_ILL | BF_NON /* US  */, [ 95] = BF_TOK | BF_NON /* _   */, [159] = BF_ILL | BF_NON, [223] = BF_ILL | BF_NON,
-    [ 32] = BF_SPC | BF_NON /* SPC */, [ 96] = BF_ILL | BF_NON /* `   */, [160] = BF_ILL | BF_NON, [224] = BF_ILL | BF_NON,
+    [ 32] = BF_SPC | BF_WSP /* SPC */, [ 96] = BF_ILL | BF_NON /* `   */, [160] = BF_ILL | BF_NON, [224] = BF_ILL | BF_NON,
     [ 33] = BF_ILL | BF_NON /* !   */, [ 97] = BF_TOK | BF_NON /* a   */, [161] = BF_ILL | BF_NON, [225] = BF_ILL | BF_NON,
     [ 34] = BF_CTL|BF_ESC|BF_ESS/* */, [ 98] = BF_TOK | BF_ESS /* b   */, [162] = BF_ILL | BF_NON, [226] = BF_ILL | BF_NON,
     [ 35] = BF_CTL | BF_NON /* #   */, [ 99] = BF_TOK | BF_NON /* c   */, [163] = BF_ILL | BF_NON, [227] = BF_ILL | BF_NON,
-    [ 36] = BF_ILL | BF_NON /* $   */, [100] = BF_TOK | BF_NON /* d   */, [164] = BF_ILL | BF_NON, [228] = BF_ILL | BF_NON,
+    [ 36] = BF_TOK | BF_NON /* $   */, [100] = BF_TOK | BF_NON /* d   */, [164] = BF_ILL | BF_NON, [228] = BF_ILL | BF_NON,
     [ 37] = BF_ILL | BF_NON /* %   */, [101] = BF_TOK | BF_NON /* e   */, [165] = BF_ILL | BF_NON, [229] = BF_ILL | BF_NON,
     [ 38] = BF_ILL | BF_NON /* &   */, [102] = BF_TOK | BF_ESS /* f   */, [166] = BF_ILL | BF_NON, [230] = BF_ILL | BF_NON,
     [ 39] = BF_CTL|BF_ESC|BF_ESS/*'*/, [103] = BF_TOK | BF_NON /* g   */, [167] = BF_ILL | BF_NON, [231] = BF_ILL | BF_NON,

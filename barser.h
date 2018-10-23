@@ -194,14 +194,16 @@ struct BsNode {
     char *name;				/* node name */
     char *value;			/* node value */
 
+    BsNode *parent;			/* parent of our node, NULL for root */
+
     LL_HOLDER(BsNode);			/* linked list root */
     LL_MEMBER(BsNode);			/* but also a linked list member */
 
-    BsNode *parent;			/* parent of our node, NULL for root */
+    BsNode* _indexNext;			/* singly linked list to hold index chains */
 
     size_t nameLen;			/* name length */
     uint32_t hash;			/* sum of hashes from root to this guy */
-    int childCount;			/* fat bastard on benefits and dodgy DLA */
+    unsigned int childCount;			/* fat bastard on benefits and dodgy DLA */
     unsigned int type;			/* node type enum */
     unsigned int flags;			/* flags - quoted name, quoted value, etc. */
 
@@ -290,6 +292,10 @@ int bsDumpNode(FILE* fl, BsNode *node);
 BsNode* bsGet(BsDict *dict, const char* qry);
 /* retrieve entry from dictionary node based on path */
 BsNode* bsNodeGet(BsDict* dict, BsNode *node, const char* qry);
+/* get (first) parent's child of the given name / check if child exists */
+BsNode* bsGetChild(BsDict* dict, BsNode *parent, const char* name);
+/* iteratively grab parent's n-th child (starting from 0!) */
+BsNode* bsNthChild(BsDict* dict, BsNode *parent, const unsigned int childno);
 
 /* rename a node and recursively reindex if necessary */
 void bsRenameNode(BsDict* dict, BsNode* node, const char* newname);
@@ -298,14 +304,31 @@ void bsRenameNode(BsDict* dict, BsNode* node, const char* newname);
  * Put BS_PATH_SEP-separated path of given node into out. If out is NULL,
  * required string lenth (including zero-termination) is returned and no
  * extraction is done. Otherwise the length should be passed as @outlen,
- * and path is copied into *out.
+ * and path is copied into *out. The escaped versions add escape characters
+ * to path elements, leaving the '/' intact.
  */
 size_t bsGetPath(BsNode *node, char* out, const size_t outlen);
 /* allocate space on the stack and get node path */
 #define BS_GETNP(node, var) size_t var##_size = bsGetPath(node, NULL, 0);\
 				    char var[var##_size];\
 				    bsGetPath(node, var, var##_size);
+size_t bsGetEscapedPath(BsNode *node, char* out, const size_t outlen);
+/* allocate space on the stack and get node path */
+#define BS_GETENP(node, var) size_t var##_size = bsGetEscapedPath(node, NULL, 0);\
+				    char var[var##_size];\
+				    bsGetEscapedPath(node, var, var##_size);
 
+/* various helper functions */
+
+/* unescape a string in place and return new size including NUL-termination */
+size_t bsUnescapeStr(char *str);
+/* place escaped string in @out, return required size (also if @out is 0) including NUL-termination */
+size_t bsEscapeStr(const char *str, char *out);
+/* get an escaped duplicate of string src */
+char* bsGetEscapedStr(const char* src);
+
+/* this is a test call to remain here until development is done */
+bool bsTest();
 
 #endif /* BARSER_H_ */
 

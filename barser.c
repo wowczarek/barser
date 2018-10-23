@@ -111,7 +111,7 @@ memset(name, 0, name ## _len);
 #define tl(n) state.tokenCache[n].len
 
 /* get the existing child of node 'parent' named as token #n in cache */
-#define gch(parent, n) getNodeChild(dict, parent, state.tokenCache[n].data, state.tokenCache[n].len)
+#define gch(parent, n) _bsGetChild(dict, parent, state.tokenCache[n].data, state.tokenCache[n].len)
 
 /* string scan state machine */
 enum {
@@ -214,15 +214,15 @@ static inline int bsForward(BsState *state) {
 
     int c;
 
-    if(state->current >= state->end) {                                          
-        return EOF;                                                 
-    }         
-                                              
-    state->prev = state->c; 
-                                  
+    if(state->current >= state->end) {
+        return EOF;
+    }
+
+    state->prev = state->c;
+
     state->current++;
-    c = *state->current;                                  
-                                                                         
+    c = *state->current;
+
     if(c == '\0') {
         state->c = EOF;
         return EOF;
@@ -606,6 +606,9 @@ _bsDumpNode(FILE* fl, BsNode *node, int level)
 
 /* dump a single node recursively to file, return number of bytes written */
 int bsDumpNode(FILE* fl, BsNode *node) {
+    if(node == NULL) {
+	return fprintf(fl, "null\n");
+    }
     return _bsDumpNode(fl, node, 0);
 }
 
@@ -654,20 +657,19 @@ static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned
 
     xmalloc(ret, sizeof(BsNode));
 
-    if(ret == NULL) {
-	return NULL;
-    }
+    /* could have calloc'd, but... */
 
-    ret->parent = parent;
-    ret->type = type;
-
-    /* could have calloc'd, but... was d */
-    ret->flags = 0;
     ret->value = NULL;
-    ret->childCount = 0;
-    ret->nameLen = 0;
+    ret->parent = parent;
+
+    ret->_indexNext = NULL;
     ret->_firstChild = ret->_lastChild = ret->_next = ret->_prev = NULL;
     ret->_first = NULL;
+
+    ret->nameLen = 0;
+    ret->childCount = 0;
+    ret->type = type;
+    ret->flags = 0;
 #ifdef COLL_DEBUG
     ret->collcount = 0;
 #endif /* COLL_DEBUG */
@@ -680,14 +682,17 @@ static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned
 	    char* endname = u32toa(numname, parent->childCount);
 	    slen = endname - numname;
 	    xmalloc(ret->name, slen + 1);
-	    memcpy(ret->name, numname, slen);
+	    memcpy(ret->name, numname, slen + 1);
 	} else {
 	    if(name == NULL) {
 		goto onerror;
 	    }
 	    ret->name = name;
-	    /* the extra byte is for a trailing '/', not for NUL */
-	    slen = namelen;
+	    if(namelen == 0) {
+		slen = strlen(name);
+	    } else {
+		slen = namelen;
+	    }
 	}
 
 	/* mix this node's name's hash with parent's hash */
@@ -759,12 +764,10 @@ BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, cons
 }
 
 /* [get|check if] parent node has a child with specified name */
-static inline BsNode* getNodeChild(BsDict* dict, BsNode *parent, const char* name, const size_t namelen) {
+static inline BsNode* _bsGetChild(BsDict* dict, BsNode *parent, const char* name, const size_t namelen) {
 
     uint32_t hash;
     BsNode* n;
-    LList *l;
-    LListMember *m;
 
     if(name != NULL && namelen > 0) {
 
@@ -773,20 +776,12 @@ static inline BsNode* getNodeChild(BsDict* dict, BsNode *parent, const char* nam
 	/* grab node from index if we can */
 	if(!(dict->flags & BS_NOINDEX)) {
 
-	    l = bsIndexGet(dict->index, hash);
-
-	    if(l != NULL) {
-
-		LL_FOREACH_DYNAMIC(l, m) {
-
-		    n = m->value;
-		    if(n != NULL && n->parent == parent) {
-			return n;
-		    }
-
+	    for(n = bsIndexGet(dict->index, hash); n != NULL; n = n->_indexNext) {
+		if(n->parent == parent) {
+		    return n;
 		}
-
 	    }
+
 	/* otherwise do a naive search */
 	} else {
 
@@ -895,7 +890,8 @@ void bsFree(BsDict *dict) {
 
 }
 
-static inline char* unescapeString(char *str) {
+/* unescape a string in place and return new length including NUL-termination */
+inline size_t bsUnescapeStr(char *str) {
 
     int c;
     char *in = str;
@@ -932,7 +928,59 @@ static inline char* unescapeString(char *str) {
 
     str[len] = '\0';
 
-    return str;
+    return len + 1;
+
+}
+
+/* place escaped string in @out, return required length (also if @out is 0) including NUL-termination */
+inline size_t bsEscapeStr(const char *src, char *out) {
+
+    int c;
+    char *in = (char*)src;
+    size_t len = 1;
+
+    /* keep scanning */
+    while((c = *(in++)) != '\0') {
+
+	if(cclass(BF_ESC)) {
+	    if(out != NULL) {
+		*(out++) = BS_ESCAPE_CHAR;
+		*(out++) = esccodes[c];
+	    }
+	    len += 2;
+	} else if (c == BS_PATH_SEP) {
+	    if(out != NULL) {
+		*(out++) = BS_ESCAPE_CHAR;
+		*(out++) = c;
+	    }
+	    len += 2;
+	} else {
+	    if(out != NULL) {
+		*(out++) = c;
+	    }
+	    len++;
+	}
+
+    }
+
+    if(out != NULL) {
+	*out = '\0';
+    }
+
+    return len;
+
+}
+
+/* get an escaped duplicate of string src */
+inline char* bsGetEscapedStr(const char* src) {
+
+    size_t sl = bsEscapeStr(src, NULL);
+    char* out;
+
+    xmalloc(out, sl);
+    bsEscapeStr(src, out);
+
+    return out;
 
 }
 
@@ -943,8 +991,8 @@ static inline BsToken* unescapeToken(BsToken* out, char** in, const char sep) {
     bool captured = false;
     int c;
 
-    /* skip past the separator and anything random */
-    while( (((c = **in) == sep) || !cclass(BF_TOK|BF_EXT)) && c != '\0') {
+    /* skip past the separator and proper whitespace */
+    while( (((c = **in) == sep) || cclass(BF_WSP)) && c != '\0') {
 	(*in)++;
     }
 
@@ -1873,6 +1921,46 @@ size_t bsGetPath(BsNode *node, char* out, const size_t outlen) {
 
 }
 
+/* escaped version of bsGetPath */
+size_t bsGetEscapedPath(BsNode *node, char* out, const size_t outlen) {
+
+    size_t pathlen = 1;
+    char* target = out + outlen - 1;
+
+    if(node == NULL) {
+	return 1;
+    }
+
+    for(BsNode *walker = node; walker->parent != NULL; walker = walker->parent) {
+
+	size_t elen = bsEscapeStr(walker->name, NULL) - 1;
+	char ename[elen + 1];
+	bsEscapeStr(walker->name, ename);
+
+	pathlen += elen;
+
+	if(walker->parent->parent != NULL) {
+	    pathlen++;
+	}
+
+	if(out != NULL) {
+	    target -= elen;
+	    memcpy(target, ename, elen);
+	    if(walker->parent->parent != NULL) {
+		target--;
+		*target = BS_PATH_SEP;
+	    }
+	}
+    }
+
+    if(out != NULL) {
+	out[pathlen - 1] = '\0';
+    }
+
+    return pathlen;
+
+}
+
 /* expand escape sequences and produce a clean query trimmed on both ends, matching the bsGetPath output */
 static inline size_t cleanupQuery(char* query) {
 
@@ -1943,10 +2031,8 @@ static inline uint32_t bsGetPathHash(BsNode* root, const char* query) {
 
     /* iterate over tokens */
     while(unescapeToken(&tok, &marker, BS_PATH_SEP)) {
-
 	hash = BS_MIX_HASH(xxHash32(tok.data, tok.len), hash, tok.len);
 	free(tok.data);
-
     }
 
     return hash;
@@ -1958,8 +2044,8 @@ BsNode* bsNodeGet(BsDict* dict, BsNode *node, const char* qry) {
 
     BsToken tok;
     uint32_t hash;
-    BsNode *current = node;
-    char* cqry;
+    BsNode *n = node;
+    char *cqry;
     char *marker;
 
     if(qry != NULL) {
@@ -1971,35 +2057,27 @@ BsNode* bsNodeGet(BsDict* dict, BsNode *node, const char* qry) {
 	    /* if the dictionary is indexed, search in index */
 	    if(!(dict->flags & BS_NOINDEX)) {
 
-		LList* l =  bsIndexGet(dict->index, hash);
-		if(l != NULL) {
-		    LListMember *m;
-		    LL_FOREACH_DYNAMIC(l, m) {
-
-			current = m->value;
-
-			BS_GETNP(current, path);
-			if(!strcmp(cqry, path)) {
-			    free(cqry);
-			    return current;
-			}
-
+		for(n = bsIndexGet(dict->index, hash); n != NULL; n = n->_indexNext) {
+		    BS_GETNP(n, path);
+		    if(!strcmp(cqry, path)) {
+		        free(cqry);
+		        return n;
 		    }
 		}
 	    /* otherwise do a naive search */
 	    } else {
 
-		marker = cqry;
+		marker = (char*)qry;
 		/* iterate over tokens, moving down the tree as we find children token by token */
-		while((current != NULL) && unescapeToken(&tok, &marker, BS_PATH_SEP)) {
+		while((n != NULL) && unescapeToken(&tok, &marker, BS_PATH_SEP)) {
 
-		    current = getNodeChild(dict, current, tok.data, tok.len);
+		    n = _bsGetChild(dict, n, tok.data, tok.len);
 		    free(tok.data);
 
 		}
 
 		free(cqry);
-		return current;
+		return n;
 
 	    }
 
@@ -2019,6 +2097,62 @@ BsNode* bsGet(BsDict* dict, const char* qry) {
     return bsNodeGet(dict, dict->root, qry);
 }
 
+/* public version that calls strlen */
+BsNode* bsGetChild(BsDict* dict, BsNode *parent, const char* name) {
+
+    if(name == NULL) {
+	return NULL;
+    }
+
+    return _bsGetChild(dict, parent, name, strlen(name));
+}
+
+/*
+ * Get parent's n-th child - simple iterative search. Yes, we could have
+ * a separate index keyed on child numbers, but do we want that?
+ */
+BsNode* bsNthChild(BsDict* dict, BsNode *parent, const unsigned int childno) {
+
+    unsigned int i = 0;
+    BsNode* n;
+
+    if(parent == NULL || parent->childCount == 0) {
+	return NULL;
+    }
+
+    if(childno >= parent->childCount) {
+	return NULL;
+    }
+
+    /* children are a doubly linked list, so if we are above half, count from the end */
+    if(childno > (parent->childCount / 2)) {
+
+	i = parent->childCount - 1;
+
+	LL_FOREACH_DYNAMIC_REVERSE(parent, n) {
+
+	    if(i == childno) {
+		return n;
+	    }
+	    i--;
+
+	}
+    /* otherwise count from beginning */
+    } else {
+
+	LL_FOREACH_DYNAMIC(parent, n) {
+
+	    if(i == childno) {
+		return n;
+	    }
+	    i++;
+	}
+
+    }
+
+    return NULL;
+
+}
 
 /* rename a node and recursively reindex if necessary */
 void bsRenameNode(BsDict* dict, BsNode* node, const char* newname) {
@@ -2085,5 +2219,12 @@ BsDict* bsDuplicate(BsDict *source, const char* newname, const uint32_t newflags
     bsNodeWalk(source, source->root, dest, dest->root, bsDupCallback);
 
     return dest;
+
+}
+
+/* test sink - return false to stop the test program */
+bool bsTest() {
+
+    return true;
 
 }

@@ -35,9 +35,10 @@
 
 
 #include <stdint.h>
+#include <stdio.h>
 
 #include "rbt/rbt.h"
-#include "linked_list.h"
+#include "xalloc.h"
 #include "barser.h"
 
 /*
@@ -47,7 +48,8 @@
 /* create index */
 void* bsIndexCreate() {
 
-    return rbCreatePrealloc(sizeof(LList), NULL);
+    return rbCreate();
+
 }
 
 /* free index */
@@ -58,7 +60,7 @@ void bsIndexFree(void* index) {
 }
 
 /* retrieve node list from index */
-LList* bsIndexGet(void *index, const uint32_t hash) {
+void* bsIndexGet(void *index, const uint32_t hash) {
 
     RbNode *ret = rbSearch(((RbTree*)index)->root, hash);
 
@@ -73,18 +75,24 @@ LList* bsIndexGet(void *index, const uint32_t hash) {
 /* insert node into index */
 void bsIndexPut(BsDict *dict, BsNode* node) {
 
+    BsNode *n;
     RbNode* inode = rbInsert((RbTree*)(dict->index), node->hash);
 
-#ifdef TODO_CHECK
-#error todo: index is created with prealloc, so this is unnecessary
-#endif
-//    if(inode != NULL && inode->value != NULL) {
+
+    if(inode == NULL) {
+	fprintf(stderr, "*** %s(): dictionary \"%s\", rbInsert() returned NULL, this should not happen, index is broken ***\n",
+		__func__, dict->name);
+	exit(EXIT_ALLOCERR);
+    }
+
+	n = inode->value;
+
+	if(n == NULL) {
+	    inode->value = node;
+	} else {
 
 #ifdef COLL_DEBUG
-	LList *l = inode->value;
-	if(!llisEmpty(l)) {
 	    #include <stdio.h>
-	    BsNode* n = l->_firstChild->value;
 	    BS_GETNP(n, p1);
 	    BS_GETNP(node, p2);
 	    fprintf(stderr, "*** hash collision: '%s' and '%s' share hash 0x%08x\n", p1, p2, node->hash);
@@ -95,13 +103,18 @@ void bsIndexPut(BsDict *dict, BsNode* node) {
 	     */
 	    n->collcount++;
 	    dict->maxcoll = max(dict->maxcoll, n->collcount);
-	}
+
 #endif /* COLL_DEBUG */
 
-	llAppendItem(inode->value, node);
-	node->flags |= BS_INDEXED;
+	    while (n->_indexNext != NULL) {
+		 n = n->_indexNext;
+	    }
 
-//    }
+	    n->_indexNext = node;
+
+	}
+
+	node->flags |= BS_INDEXED;
 
 }
 
@@ -109,13 +122,34 @@ void bsIndexPut(BsDict *dict, BsNode* node) {
 void bsIndexDelete(void *index, BsNode* node) {
 
     RbTree *tree = index;
+    BsNode *n;
+    BsNode *prev = NULL;
 
-    RbNode *n = rbSearch(tree->root, node->hash);
+    RbNode *inode = rbSearch(tree->root, node->hash);
 
-    if(n != NULL) {
+    if(inode != NULL) {
 
-	llRemoveItem(n->value, node);
-	
+	for(n = inode->value; n != NULL; n = n->_indexNext) {
+
+	    if(n == node) {
+		break;
+	    }
+	    prev = n;
+
+	}
+
+	if(n != NULL) {
+
+	    if(prev == NULL) {
+		inode->value = NULL;
+	    } else {
+		prev->_indexNext = n->_indexNext;
+	    }
+
+	    n->_indexNext = NULL;
+
+	}
+
     }
 
 }
