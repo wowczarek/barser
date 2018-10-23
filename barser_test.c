@@ -54,7 +54,7 @@
 #define DUR_PRINT(name, msg) fprintf(stderr, "%s: %llu ns\n", msg, name##_delta);
 #define DUR_EPRINT(name, msg) DUR_END(name); fprintf(stderr, "%s: %llu ns\n", msg, name##_delta);
 
-#define QUERYCOUNT 10000
+#define QUERYCOUNT 20000
 
 struct sample {
     BsNode* node;
@@ -65,12 +65,14 @@ struct sample {
 static uint32_t* randArrayU32(const int count) {
 
     int i;
-    struct timeval t;
 
+#ifndef NORAND_DEBUG
+    struct timeval t;
     /* good idea oh Lord */
     gettimeofday(&t, NULL);
     /* of course it's a good idea! */
     srand(t.tv_sec + t.tv_usec);
+#endif
 
     uint32_t* ret;
     xmalloc(ret, count * sizeof(uint32_t));
@@ -89,7 +91,7 @@ static uint32_t* randArrayU32(const int count) {
     return ret;
 }
 
-static void* countcb(BsDict *dict, BsNode *node, void* user, void* feedback, bool* cont) {
+static void* filtercb(BsDict *dict, BsNode *node, void* user, void* feedback, bool* cont) {
 
     uint32_t* counter = user;
     struct sample* samples = feedback;
@@ -113,6 +115,11 @@ int main(int argc, char **argv) {
     int ret = 0;
     size_t nodecount;
 
+    if(!bsTest()) {
+	fprintf(stderr, "bsTest() told me to exit early\n");
+	return 0;
+    }
+
     if(argc < 2) {
 
 	fprintf(stderr, "Error: no arguments given.\n\nUsage: %s <filename> [-p] [\"path/to/node\"]\n\nfilename\tread input from file or stdin (\"-\")\n-p\t\tdump parsed contents to stdout\npath/to/node\tretrieve contents of node with given path\n\n",
@@ -121,9 +128,6 @@ int main(int argc, char **argv) {
 	return -1;
 
     }
-
-//    BsDict *dict = bsCreate("test", BS_NOINDEX);
-    BsDict *dict = bsCreate("test", BS_NONE);
 
     fprintf(stderr, "Loading \"%s\" into memory... ", argv[1]);
     fflush(stderr);
@@ -135,7 +139,6 @@ int main(int argc, char **argv) {
 	fprintf(stderr, "Error: could not read input file\n");
 	return -1;
     }
-
     DUR_END(test);
     fprintf(stderr, "done.\n");
 
@@ -144,6 +147,9 @@ int main(int argc, char **argv) {
 
     fprintf(stderr, "Parsing data... ");
     fflush(stderr);
+
+//    BsDict *dict = bsCreate("test", BS_NOINDEX);
+    BsDict *dict = bsCreate("test", BS_NONE);
 
     DUR_START(test);
     BsState state = bsParse(dict, buf, len);
@@ -175,11 +181,13 @@ int main(int argc, char **argv) {
 	}
     }
 
+    BsNode* node;
+
     if(qry != NULL) {
 	fprintf(stderr, "Testing single fetch of \"%s\" from dictionary...", qry);
 	fflush(stderr);
 	DUR_START(test);
-	BsNode* node = bsGet(dict, qry);
+	node = bsGet(dict, qry);
 	DUR_END(test);
 	fprintf(stderr, "done.\n");
 	fprintf(stderr, "Single / first fetch took %llu ns\n", test_delta);
@@ -195,59 +203,86 @@ int main(int argc, char **argv) {
 	    ret = 2;
 	}
 
-	uint32_t querycount = min(QUERYCOUNT, dict->nodecount);
+    }
 
-	struct sample* samples;
-	xcalloc(samples, dict->nodecount, sizeof(struct sample));
-	char* paths[querycount];
+    /* random queries begin */
 
-	fprintf(stderr, "Extracting random %d nodes... ", querycount);
+    uint32_t querycount = min(QUERYCOUNT, dict->nodecount);
 
-	uint32_t* sarr = randArrayU32(dict->nodecount);
+    fprintf(stderr, "Extracting random %d nodes... ", querycount);
 
-	for(int i = 0; i < querycount; i++) {
-	    samples[sarr[i]].required = true;
+    struct sample* samples;
+    xcalloc(samples, dict->nodecount, sizeof(struct sample));
+
+    char* paths[querycount];
+
+    uint32_t* sarr = randArrayU32(dict->nodecount);
+
+    int found = 0;
+
+    /* mark which nodes we want to grab */
+    for(int i = 0; i < querycount; i++) {
+        /* root node gives an empty path, resulting in a false "not found" */
+        if(sarr[i] == 0) {
+	    found++;
 	}
+	samples[sarr[i]].required = true;
+    }
 
-	uint32_t  n = 0;
-	bsNodeWalk(dict, dict->root, &n, samples, countcb);
+    uint32_t  n = 0;
+    /* this callback counts nodes as it progresses, incrementing n, and fills in nodes marked above */
+    bsNodeWalk(dict, dict->root, &n, samples, filtercb);
 
-	for(int i = 0; i < querycount; i++) {
-	    if(samples[sarr[i]].node != NULL) {
-		size_t pl = bsGetPath(samples[sarr[i]].node, NULL, 0);
-		xmalloc(paths[i], pl);
-		bsGetPath(samples[sarr[i]].node, paths[i], pl);
+    for(int i = 0; i < querycount; i++) {
+	if(samples[sarr[i]].node != NULL) {
+	    BS_GETENP(samples[sarr[i]].node, pth);
+	    xmalloc(paths[i], pth_size);
+	    memcpy(paths[i], pth, pth_size);
+	}
+    }
+
+    fprintf(stderr, "done.\n");
+
+    fprintf(stderr, "Getting %d random paths from dictionary... ", querycount);
+    fflush(stderr);
+
+#ifdef COLL_DEBUG
+    bool hadit = false;
+#endif /* COLL_DEBUG */
+    DUR_START(test);
+    for(int i = 0; i< querycount; i++) {
+	node = bsGet(dict, paths[i]);
+	if(node != NULL) {
+	    found++;
+	}
+#ifdef COLL_DEBUG
+	 else {
+	    if(!hadit) {
+		fprintf(stderr, "\n");
 	    }
+	    fprintf(stderr, "* Node not found: \"%s\"\n", paths[i]);
+	    hadit = true;
 	}
+#endif /* COLL_DEBUG */
+    }
+    DUR_END(test);
+    fprintf(stderr, "done.\n");
+    fprintf(stderr, "Found %d out of %d nodes (%s), average %llu ns per fetch\n", found, querycount,
+	    (dict->flags & BS_NOINDEX) ? "unindexed" : "indexed", test_delta / querycount);
 
-	fprintf(stderr, "done.\n");
+    fprintf(stderr, "Freeing test data... ");
+    fflush(stderr);
 
-	fprintf(stderr, "Getting %d random paths from dictionary... ", querycount);
-	fflush(stderr);
-	int found = 0;
-	DUR_START(test);
-	for(int i = 0; i< querycount; i++) {
-	    node = bsGet(dict, paths[i]);
-	    if(node != NULL) {
-		found++;
-	    }
-	}
-	DUR_END(test);
-	fprintf(stderr, "done.\n");
-	fprintf(stderr, "Found %d out of %d, average fetch time %llu ns per query\n", found, querycount, test_delta / querycount);
+    for(int i = 0; i< querycount; i++) {
+	free(paths[i]);
+    }
+    free(samples);
+    free(sarr);
+    fprintf(stderr, "done.\n");
 
-	fprintf(stderr, "Freeing test data... ");
-	fflush(stderr);
+    /* random queries end */
 
-	for(int i = 0; i< querycount; i++) {
-	    free(paths[i]);
-	}
-	free(samples);
-	free(sarr);
-	fprintf(stderr, "done.\n");
-
-    /* no query given - test duplication */
-    } else {
+if(qry == NULL) {
 
 	fprintf(stderr, "Duplicating dictionary... ");
 	fflush(stderr);
