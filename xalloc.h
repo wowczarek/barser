@@ -56,6 +56,10 @@
 #define xcalloc(var, n, size) ((((var) = calloc(n, size)) == NULL) ? xallocfail("calloc") : var)
 #endif /* xcalloc */
 
+#ifndef xcmalloc
+#define xcmalloc(var, size) ((((var) = calloc(1, size)) == NULL) ? xallocfail("calloc") : var)
+#endif /* xcmalloc */
+
 #ifndef xrealloc
 #define xrealloc(var, ptr, size) ((((var) = realloc(ptr, size)) == NULL) ? xallocfail("realloc") : var)
 #endif /* xrealloc */
