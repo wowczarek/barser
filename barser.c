@@ -767,7 +767,7 @@ BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, cons
 static inline BsNode* _bsGetChild(BsDict* dict, BsNode *parent, const char* name, const size_t namelen) {
 
     uint32_t hash;
-    BsNode* n;
+    BsNode *n, *m;
 
     if(name != NULL && namelen > 0) {
 
@@ -785,10 +785,39 @@ static inline BsNode* _bsGetChild(BsDict* dict, BsNode *parent, const char* name
 	/* otherwise do a naive search */
 	} else {
 
-	    LL_FOREACH_DYNAMIC(parent, n) {
+	    /*
+	     * (todo: investigate skip lists - but that would be an index)
+	     * for now, search from both ends of the list simultaneously.
+	     */
+
+	    n = parent->_firstChild;
+	    m = parent->_lastChild;
+
+	    /* until we meet */
+	    while( m != NULL && n != NULL) {
+
 		if(n->hash == hash && n->nameLen == namelen && !strncmp(name, n->name, namelen)) {
 		    return n;
 		}
+
+		/* we've met */
+		if(m == n) {
+		    break;
+		}
+
+		if(m->hash == hash && m->nameLen == namelen && !strncmp(name, m->name, namelen)) {
+		    return m;
+		}
+
+		n = n->_next;
+
+		/* we're about to pass each other */
+		if(m == n) {
+		    break;
+		}
+
+		m = m->_prev;
+
 	    }
 	
 	}
