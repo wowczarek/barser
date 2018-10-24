@@ -663,8 +663,8 @@ static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned
     ret->parent = parent;
 
     ret->_indexNext = NULL;
-    ret->_firstChild = ret->_lastChild = ret->_next = ret->_prev = NULL;
-    ret->_first = NULL;
+    LL_CLEAR_HOLDER(ret);
+    LL_CLEAR_MEMBER(ret);
 
     ret->nameLen = 0;
     ret->childCount = 0;
@@ -866,6 +866,30 @@ BsDict* bsCreate(const char *name, const uint32_t flags) {
     return ret;
 }
 
+void bsEmpty(BsDict *dict) {
+
+    if(dict == NULL) {
+	return;
+    }
+
+    /* if the dictionary is indexed, free the dictionary on index level */
+    if(!(dict->flags & BS_NOINDEX) && dict->index != NULL) {
+	bsIndexFree(dict->index);
+    /* otherwise delete nodes recursively */
+    } else {
+	bsDeleteNode(dict, dict->root);
+    }
+
+    LL_CLEAR_HOLDER(dict->root);
+    LL_CLEAR_MEMBER(dict->root);
+
+    dict->root->childCount = 0;
+#ifdef COLL_DEBUG
+    dict->root->collcount = 0;
+#endif /* COLL_DEBUG */
+
+}
+
 /* free a dictionary */
 void bsFree(BsDict *dict) {
 
@@ -873,17 +897,14 @@ void bsFree(BsDict *dict) {
 	return;
     }
 
+    bsEmpty(dict);
+
     if(dict->root != NULL) {
-	bsDeleteNode(dict, dict->root);
 	bsFreeNode(dict->root);
     }
 
     if(dict->name != NULL) {
 	free(dict->name);
-    }
-
-    if(!(dict->flags & BS_NOINDEX) && dict->index != NULL) {
-	bsIndexFree(dict->index);
     }
 
     free(dict);

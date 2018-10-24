@@ -264,6 +264,10 @@ BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, cons
 
 /* clean up and free dictionary */
 void bsFree(BsDict *dict);
+/* empty the dictionary */
+void bsEmpty(BsDict *dict);
+/* free a single node */
+void bsFreeNode(BsNode *node);
 
 /* duplicate a dictionary, give new name to resulting dictionary */
 BsDict* bsDuplicate(BsDict *source, const char* newname, const uint32_t newflags);

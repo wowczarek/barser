@@ -52,9 +52,22 @@ void* bsIndexCreate() {
 
 }
 
+static void bsIndexFreeCallback(void* head) {
+
+    BsNode* node = head;
+    BsNode* tmp;
+    while(node != NULL) {
+	tmp = node;
+	node = node->_indexNext;
+	bsFreeNode(tmp);
+    }
+
+}
+
 /* free index */
 void bsIndexFree(void* index) {
 
+    ((RbTree*)index)->freeCallback = bsIndexFreeCallback;
     rbFree(index);
 
 }
