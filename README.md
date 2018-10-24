@@ -23,9 +23,10 @@ The "Bastard" in the name refers to the supported format, not the parser itself,
 - Support for C-style multiline comments
 - Support for basic escape characters in quoted strings
 - Character classes and meanings all defined in a separate header file, `barser_defaults.h`
-- Basic operations on the resulting structure - searches, retrieving nodes, duplication, deletion, renaming.
+- Basic operations on the resulting structure - searches, retrieving nodes, duplication, deletion, renaming
+- Indexed operation (red-black tree based) or indexless
 
-## Todo / progress:
+## Todo / progress
 
 - Implement a good node hashing strategy **[done]**. Using xxhash of node name, XOR-mixed with parent's hash. Mixing works reasonably well - total of 22k collisions for citylots.js at 13M nodes, max nodes per hash 2.
 - Implement indexing of inserted tree nodes using a red-black tree index initially **[slow, but done]**
@@ -82,7 +83,7 @@ dogs {
         age 5;
         sex "M";
         favourite_quotation "To\nbe\nor\n\t\tnot\nto\nbe";
-        location "Guadelupa";
+        location "Guadeloupe";
         targets [ trees postman drunks Jacques Marie ];
         cats-maimed {
             cat "D'Artagnan" {
@@ -197,3 +198,95 @@ Yes, this is all very loose, but *flexible* is the key.
 Barser scans the input buffer byte by byte, skipping whitespaces, waiting for control characters and recognising character classes based on a 256-slot lookup table. As the scanner state machine passes through different stages, events are raised and processed accordingly. Barser accumulates string tokens in a stack and processes them once a specific control element or token count is reached - the scanner raises an event which is then picked up by the worker function inserting nodes.
 
 Barser does not reuse the existing buffer. The buffer could come from an mmaped file for example - and what happens then? Also the dictionary is to be mutable. For those reasons strings are dynamically allocated and live in the dictionary. Unquoted tokens are copied from the buffer, but quoted strings grow as they are copied byte by byte, because they need to be checked for escape sequences.
+
+## Testing
+
+Provided is a test program / benchmark, `barser_test.c`. Options:
+```
+$ ./barser_test -h
+
+barser_test (c) 2018: Wojciech Owczarek, a flexible hierarchical configuration parser
+
+usage: barser_test <-f filename> [-q query] [-Q] [-N NUMBER] [-p] [-d] [-X]
+
+-f filename     Filename to read data from (use "-" to read from stdin)
+-q query        Retrieve nodes based on query and dump to stdout
+-Q              Test random node fetch
+-N NUMBER       Number of nodes to fetch (-Q), default: min(20000, nodecount)
+-p              Dump parsed data to stdout
+-d              Test dictionary duplication
+-X              Build an unindexed dictionary
+```
+
+**Example output for a ~180 MB's worth of JunOS config:**
+
+* Indexed:
+
+```
+$ ./barser_test -f ../barserdata/junos20 -Q -N 100000
+Loading "../barserdata/junos20" into memory... done.
+Loaded 178233894 bytes in 47766904 ns, 3731.326 MB/s
+Parsing data... done.
+Parsed in 8121144069 ns (indexed), 21.947 MB/s, 5265301 nodes, 648345 nodes/s
+Extracting random 100000 nodes... done.
+Getting 100000 random paths from dictionary... done.
+Found 100000 out of 100000 nodes (indexed), average 3113 ns per fetch
+Freeing test data... done.
+Freeing dictionary... done.
+Freed in 1417070776 ns, 5265301 nodes, 3715623 nodes/s
+
+```
+
+* Unindexed (this structure is very shallow, with few children at each node):
+
+```
+$ ./barser_test -f ../barserdata/junos20 -Q -N 100000 -X
+Loading "../barserdata/junos20" into memory... done.
+Loaded 178233894 bytes in 45143494 ns, 3948.163 MB/s
+Parsing data... done.
+Parsed in 1193688712 ns (unindexed), 149.314 MB/s, 5265301 nodes, 4410950 nodes/s
+Extracting random 100000 nodes... done.
+Getting 100000 random paths from dictionary... done.
+Found 100000 out of 100000 nodes (unindexed), average 6153 ns per fetch
+Freeing test data... done.
+Freeing dictionary... done.
+Freed in 186368836 ns, 5265301 nodes, 28252046 nodes/s
+```
+
+**Example output for [citylots.json](https://github.com/zemirco/sf-city-lots-json):**
+
+(This is a big and nasty JSON file with huge arrays)
+
+* Indexed - ingestion is piss-slow, but search is decent:
+
+```
+$ ./barser_test -f ../barserdata/citylots.json -Q -N 100000
+Loading "../barserdata/citylots.json" into memory... done.
+Loaded 189778221 bytes in 48177730 ns, 3939.127 MB/s
+Parsing data... done.
+Parsed in 23612471449 ns (indexed), 8.037 MB/s, 13805884 nodes, 584686 nodes/s
+Extracting random 100000 nodes... done.
+Getting 100000 random paths from dictionary... done.
+Found 100000 out of 100000 nodes (indexed), average 2724 ns per fetch
+Freeing test data... done.
+Freeing dictionary... done.
+Freed in 4582267068 ns, 13805884 nodes, 3012894 nodes/s
+```
+
+* Unindexed - ingestion is reasonably fast, but search times are truly atrocious (big arrays need naive linked list traversal):
+
+```
+$ ./barser_test -f ../barserdata/citylots.json -Q -N 100000 -X
+Loading "../barserdata/citylots.json" into memory... done.
+Loaded 189778221 bytes in 45704952 ns, 4152.246 MB/s
+Parsing data... done.
+Parsed in 2543231229 ns (unindexed), 74.621 MB/s, 13805884 nodes, 5428482 nodes/s
+Extracting random 100000 nodes... done.
+Getting 100000 random paths from dictionary... done.
+Found 100000 out of 100000 nodes (unindexed), average 2277371 ns per fetch
+Freeing test data... done.
+Freeing dictionary... done.
+Freed in 520960318 ns, 13805884 nodes, 26500836 nodes/s
+```
+
+Yes, two milliseconds. 1e6 times worse than with the red-black tree index. Naive search times were roughly halved after linked list traversal was implemented to search from both ends of the list - so it was even worse at the start.
