@@ -33,8 +33,8 @@
  *         and as a standalone structure.
  */
 
-#ifndef CCK_LINKEDLIST_H_
-#define CCK_LINKEDLIST_H_
+#ifndef __X_LINKED_LIST_H__
+#define __X_LINKED_LIST_H__
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -55,6 +55,21 @@
     vartype **_first; \
     vartype *_next; \
     vartype *_prev;
+
+/* clear / initialise linked lists */
+#define LL_CLEAR_MEMBER(var) \
+    var->_first = NULL; \
+    var->_next = NULL; \
+    var->_prev = NULL;
+
+#define LL_CLEAR_HOLDER(var) \
+    var->_firstChild = NULL; \
+    var->_lastChild = NULL;
+
+#define LL_CLEAR_ROOT() \
+    _first = NULL;\
+    _last = NULL; \
+    _serial = 0;
 
 /* append variable to statically embedded linked list */
 #define LL_APPEND_STATIC(var) \
@@ -195,4 +210,4 @@ LListMember* llGetItemHolder(LList* list, const void *item);
 /* check if list is empty */
 bool llisEmpty(const LList* list);
 
-#endif /* CCK_LINKEDLIST_H_ */
+#endif /* __X_LINKED_LIST_H__ */
