@@ -106,34 +106,98 @@ static void* filtercb(BsDict *dict, BsNode *node, void* user, void* feedback, bo
 
 }
 
+static void usage() {
+
+    fprintf(stderr, "\nbarser_test (c) 2018: Wojciech Owczarek, a flexible hierarchical configuration parser\n\n"
+	   "usage: barser_test <-f filename> [-q query] [-Q] [-N NUMBER] [-p] [-d] [-X]\n"
+	   "\n"
+	   "-f filename     Filename to read data from (use \"-\" to read from stdin)\n"
+	   "-q query        Retrieve nodes based on query and dump to stdout\n"
+	   "-Q              Test random node fetch\n"
+	   "-N NUMBER       Number of nodes to fetch (-Q), default: min(%d, nodecount)\n"
+	   "-p              Dump parsed data to stdout\n"
+	   "-d              Test dictionary duplication\n"
+	   "-X              Build an unindexed dictionary\n"
+	   "\n", QUERYCOUNT);
+
+}
+
+
 int main(int argc, char **argv) {
 
+    int c;
     DUR_INIT(test);
     char* buf = NULL;
-    char* qry = NULL;
     size_t len;
     int ret = 0;
     size_t nodecount;
+
+    char* filename = NULL;
+    char* qry = NULL;
+    bool duplicate = false;
+    bool dump = false;
+    bool randomquery = false;
+    bool unindexed = false;
+    uint32_t querycount = QUERYCOUNT;
 
     if(!bsTest()) {
 	fprintf(stderr, "bsTest() told me to exit early\n");
 	return 0;
     }
 
-    if(argc < 2) {
+	while ((c = getopt(argc, argv, "?hf:q:QN:pdX")) != -1) {
 
-	fprintf(stderr, "Error: no arguments given.\n\nUsage: %s <filename> [-p] [\"path/to/node\"]\n\nfilename\tread input from file or stdin (\"-\")\n-p\t\tdump parsed contents to stdout\npath/to/node\tretrieve contents of node with given path\n\n",
-		argv[0]);
+	    switch(c) {
+		case 'f':
+		    filename = optarg;
+		    break;
+		case 'q':
+		    qry = optarg;
+		    break;
+		case 'Q':
+		    randomquery = true;
+		    break;
+		case 'N':
+		    querycount = atoi(optarg);
+		    break;
+		case 'p':
+		    dump = true;
+		    break;
+		case 'd':
+		    duplicate = true;
+		    break;
+		case 'X':
+		    unindexed = true;
+		    break;
+		case '?':
+		case 'h':
+		default:
+		    usage();
+		    return -1;
+	    }
+	}
 
-	return -1;
-
+    if(querycount == 0) {
+	querycount = QUERYCOUNT;
     }
 
-    fprintf(stderr, "Loading \"%s\" into memory... ", argv[1]);
+    if(argc < 2) {
+	fprintf(stderr, "\nError: no arguments given\n");
+	usage();
+	exit(-1);
+    }
+
+    if(filename == NULL) {
+	fprintf(stderr, "\nError: no filename given\n");
+	usage();
+	exit(-1);
+    }
+
+    fprintf(stderr, "Loading \"%s\" into memory... ", filename);
     fflush(stderr);
 
     DUR_START(test);
-    len = getFileBuf(&buf, argv[1]);
+    len = getFileBuf(&buf, filename);
 
     if(len <= 0 || buf == NULL) {
 	fprintf(stderr, "Error: could not read input file\n");
@@ -148,16 +212,16 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Parsing data... ");
     fflush(stderr);
 
-//    BsDict *dict = bsCreate("test", BS_NOINDEX);
-    BsDict *dict = bsCreate("test", BS_NONE);
+    BsDict *dict = bsCreate("test", unindexed ? BS_NOINDEX : BS_NONE);
 
     DUR_START(test);
     BsState state = bsParse(dict, buf, len);
     DUR_END(test);
 
     fprintf(stderr, "done.\n");
-    fprintf(stderr, "Parsed in %llu ns, %.03f MB/s, %zu nodes, %.0f nodes/s\n",
-		test_delta, (1000000000.0 / test_delta) * (len / 1000000.0),
+    fprintf(stderr, "Parsed in %llu ns (%s), %.03f MB/s, %zu nodes, %.0f nodes/s\n",
+		test_delta, unindexed ? "unindexed" : "indexed",
+		(1000000000.0 / test_delta) * (len / 1000000.0),
 		dict->nodecount, (1000000000.0 / test_delta) * dict->nodecount);
 #ifdef COLL_DEBUG
     fprintf(stderr, "Total index collisions %d, max per node %d\n", dict->collcount, dict->maxcoll);
@@ -169,16 +233,10 @@ int main(int argc, char **argv) {
 	bsPrintError(&state);
 	return -1;
 
-    } else if(argc >= 3) {
+    }
 
-	if(!strcmp(argv[2], "-p")) {
+    if(dump) {
 	    bsDump(stdout, dict);
-	    if(argc >= 4) {
-		qry = argv[3];
-	    }
-	} else {
-		qry = argv[2];
-	}
     }
 
     BsNode* node;
@@ -207,82 +265,85 @@ int main(int argc, char **argv) {
 
     /* random queries begin */
 
-    uint32_t querycount = min(QUERYCOUNT, dict->nodecount);
+    if(randomquery) {
 
-    fprintf(stderr, "Extracting random %d nodes... ", querycount);
+    querycount = min(querycount, dict->nodecount);
 
-    struct sample* samples;
-    xcalloc(samples, dict->nodecount, sizeof(struct sample));
+	fprintf(stderr, "Extracting random %d nodes... ", querycount);
 
-    char* paths[querycount];
+	struct sample* samples;
+	xcalloc(samples, dict->nodecount, sizeof(struct sample));
 
-    uint32_t* sarr = randArrayU32(dict->nodecount);
+	char* paths[querycount];
 
-    int found = 0;
+	uint32_t* sarr = randArrayU32(dict->nodecount);
 
-    /* mark which nodes we want to grab */
-    for(int i = 0; i < querycount; i++) {
-        /* root node gives an empty path, resulting in a false "not found" */
-        if(sarr[i] == 0) {
-	    found++;
-	}
-	samples[sarr[i]].required = true;
-    }
+	int found = 0;
 
-    uint32_t  n = 0;
-    /* this callback counts nodes as it progresses, incrementing n, and fills in nodes marked above */
-    bsNodeWalk(dict, dict->root, &n, samples, filtercb);
-
-    for(int i = 0; i < querycount; i++) {
-	if(samples[sarr[i]].node != NULL) {
-	    BS_GETENP(samples[sarr[i]].node, pth);
-	    xmalloc(paths[i], pth_size);
-	    memcpy(paths[i], pth, pth_size);
-	}
-    }
-
-    fprintf(stderr, "done.\n");
-
-    fprintf(stderr, "Getting %d random paths from dictionary... ", querycount);
-    fflush(stderr);
-
-#ifdef COLL_DEBUG
-    bool hadit = false;
-#endif /* COLL_DEBUG */
-    DUR_START(test);
-    for(int i = 0; i< querycount; i++) {
-	node = bsGet(dict, paths[i]);
-	if(node != NULL) {
-	    found++;
-	}
-#ifdef COLL_DEBUG
-	 else {
-	    if(!hadit) {
-		fprintf(stderr, "\n");
+	/* mark which nodes we want to grab */
+	for(int i = 0; i < querycount; i++) {
+	    /* root node gives an empty path, resulting in a false "not found" */
+	    if(sarr[i] == 0) {
+		found++;
 	    }
-	    fprintf(stderr, "* Node not found: \"%s\"\n", paths[i]);
-	    hadit = true;
+	    samples[sarr[i]].required = true;
 	}
+
+	uint32_t  n = 0;
+	/* this callback counts nodes as it progresses, incrementing n, and fills in nodes marked above */
+	bsNodeWalk(dict, dict->root, &n, samples, filtercb);
+
+	for(int i = 0; i < querycount; i++) {
+	    if(samples[sarr[i]].node != NULL) {
+		BS_GETENP(samples[sarr[i]].node, pth);
+		xmalloc(paths[i], pth_size);
+		memcpy(paths[i], pth, pth_size);
+	    }
+	}
+
+	fprintf(stderr, "done.\n");
+
+	fprintf(stderr, "Getting %d random paths from dictionary... ", querycount);
+	fflush(stderr);
+
+#ifdef COLL_DEBUG
+	bool hadit = false;
 #endif /* COLL_DEBUG */
+	DUR_START(test);
+	for(int i = 0; i< querycount; i++) {
+	    node = bsGet(dict, paths[i]);
+	    if(node != NULL) {
+		found++;
+	    }
+#ifdef COLL_DEBUG
+	    else {
+		if(!hadit) {
+		    fprintf(stderr, "\n");
+		}
+		fprintf(stderr, "* Node not found: \"%s\"\n", paths[i]);
+		hadit = true;
+	    }
+#endif /* COLL_DEBUG */
+	}
+	DUR_END(test);
+	fprintf(stderr, "done.\n");
+	fprintf(stderr, "Found %d out of %d nodes (%s), average %llu ns per fetch\n", found, querycount,
+		unindexed ? "unindexed" : "indexed", test_delta / querycount);
+
+	fprintf(stderr, "Freeing test data... ");
+	fflush(stderr);
+
+	for(int i = 0; i< querycount; i++) {
+	    free(paths[i]);
+	}
+	free(samples);
+	free(sarr);
+	fprintf(stderr, "done.\n");
+
     }
-    DUR_END(test);
-    fprintf(stderr, "done.\n");
-    fprintf(stderr, "Found %d out of %d nodes (%s), average %llu ns per fetch\n", found, querycount,
-	    (dict->flags & BS_NOINDEX) ? "unindexed" : "indexed", test_delta / querycount);
-
-    fprintf(stderr, "Freeing test data... ");
-    fflush(stderr);
-
-    for(int i = 0; i< querycount; i++) {
-	free(paths[i]);
-    }
-    free(samples);
-    free(sarr);
-    fprintf(stderr, "done.\n");
-
     /* random queries end */
 
-if(qry == NULL) {
+    if(duplicate) {
 
 	fprintf(stderr, "Duplicating dictionary... ");
 	fflush(stderr);
