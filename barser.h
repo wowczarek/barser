@@ -40,9 +40,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+
 #include "linked_list.h"
 #include "rbt/rbt.h"
-#include "barser_defaults.h"
 
 /* BsNode / BsDict is a simple hierarchical data parser,
  * with a tree structure and path-based retrieval (/parent/child/grandchild)
@@ -104,6 +104,13 @@
 #ifndef max
 #define max(a,b) ((a > b) ? (a) : (b))
 #endif
+
+/*
+ * Maximum size of token cache Barser will accept. barser_defaults.h
+ * defines its own, but this is the global maximum for Barser.
+ */
+
+#define BS_MAX_TOKENS 20
 
 /* node types */
 enum {

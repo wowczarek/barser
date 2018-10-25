@@ -33,22 +33,33 @@
  *
  */
 
-
+#include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <stdbool.h>
 
-#include <stdio.h>
-#include <string.h>
+#include "rbt/st_inline.h"
 
 #include "xalloc.h"
-#include "rbt/st_inline.h"
 #include "xxh.h"
 #include "itoa.h"
 
 #include "barser.h"
 #include "barser_index.h"
+
 #include "barser_defaults.h"
+
+/*
+ * if the defaults file wants to handle a smaller token cache,
+ * let it have it, otherwise the barser.h constant is in effect
+ */
+#if (BS_BUILD_MAX_TOKENS < BS_MAX_TOKENS)
+
+#undef BS_MAX_TOKENS
+#define BS_MAX_TOKENS BS_BUILD_MAX_TOKENS
+
+#endif /* (BS_BUILD_MAX_TOKENS < BS_MAX_TOKENS) */
 
 /* stdin block size */
 #define BS_STDIN_BLKSIZE 2048
@@ -226,7 +237,7 @@ static inline int bsForward(BsState *state) {
     if(c == '\0') {
         state->c = EOF;
         return EOF;
-    }                 
+    }
 
     /* we have a newline */
     if(cclass(BF_NLN)) {
@@ -1706,7 +1717,8 @@ static inline void bsScan(BsState *state) {
  * parse the contents of buf into dictionary dict, return last state.
  * a lot of this logic (different token number cases) is to allow consumption
  * of weirder formats like Juniper configuration. There should be a simplified
- * version for JSON which has none of that.
+ * version for JSON which has none of that, and a "native" one that forgoes
+ * some of the Juniper oddness.
  */
 BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 
@@ -2316,6 +2328,7 @@ BsNode* bsNodeGet(BsDict* dict, BsNode *node, const char* qry) {
 
 	hash = bsGetPathHash(node, qry);
         cqry = getCleanQuery(qry);
+
 	if(cqry != NULL) {
 
 	    /* if the dictionary is indexed, search in index */

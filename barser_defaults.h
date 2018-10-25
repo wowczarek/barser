@@ -29,7 +29,8 @@
  * @file   barser_defaults.h
  * @date   Sun Apr15 13:40:12 2018
  *
- * @brief  default barser token types, meanings and other default behaviour
+ * @brief  Default barser token types, meanings and other default behaviour.
+ *         This file is only included by barser.c and serves as Barser configuration.
  *
  */
 
@@ -71,15 +72,15 @@
 /* initial allocation size for a quoted string */
 #define BS_QUOTED_STARTSIZE 50
 
-/* maximum number of consecutive tokens when declaring a value - we have to stop somewhere... */
-#define BS_MAX_TOKENS 20
+/* maximum number of consecutive tokens handled when declaring a value - we have to stop somewhere... */
+#define BS_BUILD_MAX_TOKENS 20
 
 /* character class flags */
 #define BF_NON		0	/* no flags */
 #define BF_TOK		(1<<0)	/* legal part of a token */
 #define BF_EXT		(1<<1)	/* extended token characters (used in second and further tokens) */
 #define BF_CTL		(1<<2)	/* control characters */
-#define BF_SPC		(1<<3)	/* characters treated as whitespace - skipped in token search*/
+#define BF_SPC		(1<<3)	/* characters treated as whitespace - skipped in token search */
 #define BF_NLN		(1<<4)	/* newline characters */
 #define BF_ILL		(1<<5)	/* illegal characters */
 #define BF_ESC		(1<<6)	/* escapable characters */
@@ -173,7 +174,7 @@ static const uint16_t chflags[256] = {
  * I tell you, I tell you, I tell you we must die.
  *
  */
-static const char esccodes[] = {
+static const unsigned char esccodes[] = {
 
     /* these... */
 
