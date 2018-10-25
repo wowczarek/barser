@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS+=-std=c99 -Wall -I. -O3
+CFLAGS+=-std=c99 -Wall -I. -O3 -lrt
 LIBNAME = libbarser.a
 
 LIBDEPS = rbt/fq.h rbt/st.h rbt/st_inline.h rbt/rbt.h xxh.h itoa.h linked_list.h  barser_index.h barser.h barser_defaults.h
@@ -10,8 +10,8 @@ OBJ1 = barser_test.o
 OBJ2 = barser_example.o
 DEPLIBS = -lbarser
 
-%.o: %.c
-	$(CC) -c -o $@ $^ $(CFLAGS)
+%.o: %.c $(LIBDEPS)
+	$(CC) -c -o $@ $< $(CFLAGS)
 all: $(LIBNAME) barser_test barser_example
 
 $(LIBNAME): $(LIBOBJ)
