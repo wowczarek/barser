@@ -140,10 +140,6 @@ int main(int argc, char **argv) {
     bool unindexed = false;
     uint32_t querycount = QUERYCOUNT;
 
-    if(!bsTest()) {
-	fprintf(stderr, "bsTest() told me to exit early\n");
-	return 0;
-    }
 
 	while ((c = getopt(argc, argv, "?hf:q:QN:pdX")) != -1) {
 
@@ -233,6 +229,11 @@ int main(int argc, char **argv) {
 	bsPrintError(&state);
 	return -1;
 
+    }
+
+    if(!bsTest(dict)) {
+	fprintf(stderr, "bsTest() told me to exit early\n");
+	return 0;
     }
 
     if(dump) {
