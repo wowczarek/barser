@@ -33,26 +33,19 @@
  *
  */
 
-#define _POSIX_C_SOURCE 199309L /* because clock_gettime */
+#include "duration.h"
 
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
-#include <sys/time.h>
-#include <unistd.h>
-#include <time.h>
+#include <unistd.h> /* getopt */
 
 #include "xalloc.h"
-#include "barser.h"
 
-/* basic duration measurement macros */
-#define DUR_INIT(name) unsigned long long name##_delta; struct timespec name##_t1, name##_t2;
-#define DUR_START(name) clock_gettime(CLOCK_MONOTONIC,&name##_t1);
-#define DUR_END(name) clock_gettime(CLOCK_MONOTONIC,&name##_t2); name##_delta = (name##_t2.tv_sec * 1000000000 + name##_t2.tv_nsec) - (name##_t1.tv_sec * 1000000000 + name##_t1.tv_nsec);
-#define DUR_PRINT(name, msg) fprintf(stderr, "%s: %llu ns\n", msg, name##_delta);
-#define DUR_EPRINT(name, msg) DUR_END(name); fprintf(stderr, "%s: %llu ns\n", msg, name##_delta);
+
+#include "barser.h"
 
 #define QUERYCOUNT 20000
 
@@ -202,8 +195,8 @@ int main(int argc, char **argv) {
     DUR_END(test);
     fprintf(stderr, "done.\n");
 
-    fprintf(stderr, "Loaded %zu bytes in %llu ns, %.03f MB/s\n",
-		len, test_delta, (1000000000.0 / test_delta) * (len / 1000000.0));
+    fprintf(stderr, "Loaded %zu bytes in %s, %.03f MB/s\n",
+		len, DUR_HUMANTIME(test_delta), (1000000000.0 / test_delta) * (len / 1000000.0));
 
     fprintf(stderr, "Parsing data... ");
     fflush(stderr);
@@ -215,8 +208,8 @@ int main(int argc, char **argv) {
     DUR_END(test);
 
     fprintf(stderr, "done.\n");
-    fprintf(stderr, "Parsed in %llu ns (%s), %.03f MB/s, %zu nodes, %.0f nodes/s\n",
-		test_delta, unindexed ? "unindexed" : "indexed",
+    fprintf(stderr, "Parsed in %s (%s), %.03f MB/s, %zu nodes, %.0f nodes/s\n",
+		DUR_HUMANTIME(test_delta), unindexed ? "unindexed" : "indexed",
 		(1000000000.0 / test_delta) * (len / 1000000.0),
 		dict->nodecount, (1000000000.0 / test_delta) * dict->nodecount);
 #ifdef COLL_DEBUG
@@ -249,7 +242,7 @@ int main(int argc, char **argv) {
 	node = bsGet(dict, qry);
 	DUR_END(test);
 	fprintf(stderr, "done.\n");
-	fprintf(stderr, "Single / first fetch took %llu ns\n", test_delta);
+	fprintf(stderr, "Single / first fetch took %s\n", DUR_HUMANTIME(test_delta));
 
 
 
@@ -328,8 +321,8 @@ int main(int argc, char **argv) {
 	}
 	DUR_END(test);
 	fprintf(stderr, "done.\n");
-	fprintf(stderr, "Found %d out of %d nodes (%s), average %llu ns per fetch\n", found, querycount,
-		unindexed ? "unindexed" : "indexed", test_delta / querycount);
+	fprintf(stderr, "Found %d out of %d nodes (%s), average %s per fetch\n", found, querycount,
+		unindexed ? "unindexed" : "indexed", DUR_HUMANTIME(test_delta / querycount));
 
 	fprintf(stderr, "Freeing test data... ");
 	fflush(stderr);
@@ -353,8 +346,8 @@ int main(int argc, char **argv) {
 	DUR_END(test);
 
 	fprintf(stderr, "done.\n");
-	fprintf(stderr, "Duplicated in %llu ns, %zu nodes, %.0f nodes/s\n",
-		test_delta, nodecount, (1000000000.0 / test_delta) * dup->nodecount);
+	fprintf(stderr, "Duplicated in %s, %zu nodes, %.0f nodes/s\n",
+		DUR_HUMANTIME(test_delta), nodecount, (1000000000.0 / test_delta) * dup->nodecount);
 
 	fprintf(stderr, "Freeing duplicate... ");
 	fflush(stderr);
@@ -364,8 +357,8 @@ int main(int argc, char **argv) {
 	DUR_END(test);
 
 	fprintf(stderr, "done.\n");
-	fprintf(stderr, "Freed in %llu ns, %zu nodes, %.0f nodes/s\n",
-		test_delta, nodecount, (1000000000.0 / test_delta) * nodecount);
+	fprintf(stderr, "Freed in %s, %zu nodes, %.0f nodes/s\n",
+		DUR_HUMANTIME(test_delta), nodecount, (1000000000.0 / test_delta) * nodecount);
     }
 
     fprintf(stderr, "Freeing dictionary... ");
@@ -376,8 +369,8 @@ int main(int argc, char **argv) {
     DUR_END(test);
 
     fprintf(stderr, "done.\n");
-    fprintf(stderr, "Freed in %llu ns, %zu nodes, %.0f nodes/s\n",
-		test_delta, nodecount, (1000000000.0 / test_delta) * nodecount);
+    fprintf(stderr, "Freed in %s, %zu nodes, %.0f nodes/s\n",
+		DUR_HUMANTIME(test_delta), nodecount, (1000000000.0 / test_delta) * nodecount);
 
 
     free(buf);
