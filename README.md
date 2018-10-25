@@ -4,11 +4,11 @@
 
 ## About
 
-Barser is a general-purpose flexible hierarchical configurational parser / dictionary with a tree structure. Barser is built for features and convenience first, and for speed second.
+Barser is a general-purpose flexible hierarchical configurational parser / dictionary with a tree structure. Barser was built for features and convenience first, and for speed second.
 
 The "Bastard" in the name refers to the supported format, not the parser itself, as in: it will parse any old bastard of a config file.
 
-- Although Barser will parse JSON files, it is not a JSON parser. An alternative parse function could be written to deal with JSON specifically - and it would be much faster because it would not have to deal with special cases, namely multiple consecutive tokens. Barser will parse JSON and many other variants of curly bracket syntax, but the native format it can work with is similar to Juniper Networks' JunOS configuration files (or actually gated if you still remember it).
+- Although Barser will happily parse JSON files, it is not a purpose-built JSON parser. An alternative parse function could be written to deal with JSON specifically - and it would be much faster because it would not have to deal with special cases, namely multiple consecutive tokens. Barser will parse JSON and many other variants of curly bracket syntax, but the native format it can work with is similar to Juniper Networks' JunOS configuration files (or actually gated if you still remember it).
 
 - Barser is work in progress. Barser currently passes feedback tests (generating an output file (2) from an original source input file (1), and then parsing its own output to produce another output (3) : (2) and (3) are identical. Barser can now also consume and reproduce a large and complex JunOS configuration (50k+ stanzas) which is _almost_ readily importable - JunOS native config parser is unfortunately content-sensitive, so a generic approach will not work - or it will, but output will be uglier than the original. A designated JunOS output mode may be introduced later - JunOS was never the target, only an inspiration.
 
@@ -23,7 +23,9 @@ The "Bastard" in the name refers to the supported format, not the parser itself,
 - Support for C-style multiline comments
 - Support for basic escape characters in quoted strings
 - Character classes and meanings all defined in a separate header file, `barser_defaults.h`
-- Basic operations on the resulting structure - searches, retrieving nodes, duplication, deletion, renaming
+- Basic operations on the resulting structure - searches, retrieving nodes, duplication, deletion, copying, moves, renaming
+- Dictionary walks with callbacks
+- Dictionary filtering with callbacks
 - Indexed operation (red-black tree based) or indexless
 
 ## Todo / progress
@@ -34,10 +36,15 @@ The "Bastard" in the name refers to the supported format, not the parser itself,
 - Implement direct queries / node retrieval in the form of "/node/child/grandchild" **[done]** (trailing and leading "`/`"'s are removed)
 - Implement node renaming (and thus recursive rehashing) **[done]**
 - Implement dictionary copying / duplication **[done]**
+- Implement node copying, renaming, move **[done]**
 - Implement callback walks / iteration **[done]**
-- Implement merge and diff operations
+- Implement walks with node's path passed to callback **[done]**
+- Implement filter walks, returning a linked list of nodes accepted **[done]**
+- Write a proper makefile that builds a static library and installs it **[nearly done]**
 - Implement support for multiline quoted strings
+- Implement merge and diff operations
 - Implement stage 2 parsing of stored string values to other data types
+- Write some documentation **[yeah, right]**
 - Implement a simple query language - target is to support at least `"*"` for _any string_ and `"?"` for _any character_
 - Implement variable support / string replacement (`@variables { bob "square";} shapes { box "@bob@"; }`) and automatic content generation ( `@generate "seq var 1 1000" "test@var@" { hello 5; this "number@var@";}`)
 - Investigate wide character support **[meh]**
