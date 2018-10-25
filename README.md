@@ -4,7 +4,7 @@
 
 ## About
 
-Barser is a general-purpose flexible hierarchical configurational parser / dictionary with a tree structure. Barser was built for features and convenience first, and for speed second.
+Barser is a general-purpose flexible hierarchical configurational parser / dictionary library with a tree structure. Barser was built for features and convenience first, and for speed second.
 
 The "Bastard" in the name refers to the supported format, not the parser itself, as in: it will parse any old bastard of a config file.
 
@@ -16,6 +16,7 @@ The "Bastard" in the name refers to the supported format, not the parser itself,
 
 ## Features
 
+- Portable, pure C99, no external dependencies (other than included [rbt](https://github.com/wowczarek/rbt)), no POSIX dependencies,
 - Parsing files and dumping the ouput
 - User-friendly parser error output (line number / position, contents of the affected line)
 - Very loose and flexible input format
@@ -26,7 +27,7 @@ The "Bastard" in the name refers to the supported format, not the parser itself,
 - Basic operations on the resulting structure - searches, retrieving nodes, duplication, deletion, copying, moves, renaming
 - Dictionary walks with callbacks
 - Dictionary filtering with callbacks
-- Indexed operation (red-black tree based) or indexless
+- Indexed operation ([red-black tree](https://github.com/wowczarek/rbt) based) or indexless
 
 ## Todo / progress
 
