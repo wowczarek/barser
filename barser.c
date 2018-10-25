@@ -1103,7 +1103,7 @@ finalise:
 }
 
 /* node rehash callback */
-static void* bsRehashCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* cont) {
+static void* bsRehashCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* stop) {
 
     if(node->parent != NULL) {
 	if(!(dict->flags & BS_NOINDEX)) {
@@ -1121,13 +1121,13 @@ static void* bsRehashCallback(BsDict *dict, BsNode *node, void* user, void* feed
 /* run a callback recursively on node, return node where callback stoped the walk */
 BsNode* bsNodeWalk(BsDict *dict, BsNode *node, void* user, void* feedback, BsCallback callback) {
 
-    bool cont = true;
+    bool stop = false;
 
     BsNode *n, *o;
 
-    void* feedback1 = callback(dict, node, user, feedback, &cont);
+    void* feedback1 = callback(dict, node, user, feedback, &stop);
 
-    if(!cont) {
+    if(stop) {
 	return node;
     }
 
@@ -1145,6 +1145,220 @@ BsNode* bsNodeWalk(BsDict *dict, BsNode *node, void* user, void* feedback, BsCal
 BsNode*  bsWalk(BsDict *dict, void* user, BsCallback callback) {
 
     return bsNodeWalk(dict, dict->root, user, NULL, callback);
+
+}
+
+/* run a callback recursively on node, return linked list that callback permitted */
+LList* bsNodeFilter(LList* list, BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback) {
+
+    bool stop = false;
+    BsNode *n;
+
+    void* feedback1 = callback(dict, node, user, feedback, &stop);
+
+    if(list == NULL) {
+	list = llCreate();
+    }
+
+    if(stop) {
+	llAppendItem(list, node);
+    }
+
+    LL_FOREACH_DYNAMIC(node,n) {
+	bsNodeFilter(list, dict, n, user, feedback1, callback);
+    }
+
+    return list;
+}
+
+/* run a callback recursively on dictionary, return linked list that callback permitted */
+LList* bsFilter(LList* list, BsDict *dict, void* user, BsCallback callback) {
+
+    if(list == NULL) {
+	list = llCreate();
+    }
+
+    bsNodeFilter(list, dict, dict->root, user, NULL, callback);
+    return list;
+
+}
+
+/* run a callback recursively on node, passing a BsToken with node's full path as feedback */
+BsNode* bsNodePWalk(BsDict *dict, BsNode *node, void* user, void* feedback, BsCallback callback, bool escape) {
+
+    BsToken *ptok = feedback;
+    BsToken tok = { "\0", 0, 0 };
+    bool stop = false;
+    BsNode *n, *o;
+    size_t pl = 0;
+
+    if(ptok != NULL && ptok->data != NULL && ptok->data[0] != '\0') {
+	pl = ptok->len + 1;
+    } else {
+	/* this way we never give the callback a NULL */
+	pl = 0;
+    }
+
+    size_t sl = node->nameLen + pl;
+
+    /*
+     * twice the name len because we can potentially escape every character,
+     * and we allocate on the stack, so anything in a {} scope is local,
+     * and is gone once we leave the scope, so we can't do two different
+     * stack allocations depending on escape contidion.
+     * this whole idea is dangerous territory anyway.
+     */
+    char name[sl + node->nameLen + 1];
+
+    if(pl > 1) {
+	memcpy(name, ptok->data, ptok->len);
+	name[ptok->len]='/';
+    }
+    if(sl > 0) {
+	tok.data = name;
+	if(escape) {
+	    size_t enl = bsEscapeStr(node->name, NULL);
+
+	    char ename[enl];
+	    bsEscapeStr(node->name, ename);
+	    /* this also copies the NUL termination... */
+	    memcpy(name + pl, ename, enl);
+	    tok.len = pl + enl - 1;
+	    /* ...but we can never be too careful */
+	    name[tok.len] = '\0';
+	} else {
+	    memcpy(name + pl, node->name, node->nameLen);
+	    name[sl] = '\0';
+	    tok.len = sl;
+	}
+    }
+
+    /* callback uses the path */
+    callback(dict, node, user, &tok, &stop);
+
+    if(stop) {
+	return node;
+    }
+
+    LL_FOREACH_DYNAMIC(node,n) {
+	/* recursion expands the path */
+	o = bsNodePWalk(dict, n, user, &tok, callback, escape);
+	if(o != NULL) {
+	    return o;
+	}
+    }
+
+    return NULL;
+}
+
+/* same as bsWalk, but every callback is passed a BsToken as feedback, with node's full path */
+BsNode*  bsPWalk(BsDict *dict, void* user, BsCallback callback, bool escape) {
+
+    return bsNodePWalk(dict, dict->root, user, NULL, callback, escape);
+}
+
+/* run a callback recursively on node, return linked list that callback permitted, callback gets node path */
+LList* bsNodePFilter(LList *list, BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback, bool escape) {
+
+    BsToken *ptok = feedback;
+    BsToken tok = { "\0", 0, 0 };
+    bool stop = false;
+    BsNode *n;
+    size_t pl = 0;
+
+    if(ptok != NULL && ptok->data != NULL && ptok->data[0] != '\0') {
+	pl = ptok->len + 1;
+    } else {
+	/* this way we never give the callback a NULL */
+	pl = 0;
+    }
+
+    size_t sl = node->nameLen + pl;
+
+    /*
+     * twice the name len because we can potentially escape every character,
+     * and we allocate on the stack, so anything in a {} scope is local,
+     * and is gone once we leave the scope, so we can't do two different
+     * stack allocations depending on escape contidion.
+     * this whole idea is dangerous territory anyway.
+     */
+    char name[sl + node->nameLen + 1];
+
+    if(pl > 1) {
+	memcpy(name, ptok->data, ptok->len);
+	name[ptok->len]='/';
+    }
+    if(sl > 0) {
+	tok.data = name;
+	if(escape) {
+	    size_t enl = bsEscapeStr(node->name, NULL);
+
+	    char ename[enl];
+	    bsEscapeStr(node->name, ename);
+	    /* this also copies the NUL termination... */
+	    memcpy(name + pl, ename, enl);
+	    tok.len = pl + enl - 1;
+	    /* ...but we can never be too careful */
+	    name[tok.len] = '\0';
+	} else {
+	    memcpy(name + pl, node->name, node->nameLen);
+	    name[sl] = '\0';
+	    tok.len = sl;
+	}
+    }
+
+    /* callback uses the path */
+    callback(dict, node, user, &tok, &stop);
+
+    if(list == NULL) {
+	list = llCreate();
+    }
+
+    if(stop) {
+	llAppendItem(list, node);
+    }
+
+    LL_FOREACH_DYNAMIC(node,n) {
+	/* recursion expands the path */
+	bsNodePFilter(list, dict, n, user, &tok, callback, escape);
+    }
+
+    return list;
+
+}
+
+/* run a callback recursively on dictionary, return linked list that callback permitted, callback gets node path */
+LList* bsPFilter(LList* list, BsDict *dict, void* user, BsCallback callback, bool escape) {
+
+    if(list == NULL) {
+	list = llCreate();
+    }
+
+    bsNodePFilter(list, dict, dict->root, user, NULL, callback, escape);
+
+    return list;
+
+}
+
+/* callback for use with bsFilter, checking if node value contains string */
+void* bsValueContainsCb(BsDict *dict, BsNode *node, void* user, void* feedback, bool* matches) {
+
+    if(node->value != NULL && user != NULL && strstr(node->value, user)) {
+	*matches = true;
+    }
+
+    return NULL;
+
+}
+
+/* callback for use with bsFilter, checking if node value contains string */
+void* bsNameContainsCb(BsDict *dict, BsNode *node, void* user, void* feedback, bool* matches) {
+
+    if(node->name != NULL && user != NULL && strstr(node->name, user)) {
+	*matches = true;
+    }
+
+    return NULL;
 
 }
 
@@ -2205,40 +2419,55 @@ BsNode* bsNthChild(BsDict* dict, BsNode *parent, const unsigned int childno) {
 }
 
 /* rename a node and recursively reindex if necessary */
-void bsRenameNode(BsDict* dict, BsNode* node, const char* newname) {
+BsNode* bsRenameNode(BsDict* dict, BsNode* node, const char* newname) {
 
     if(node != NULL && node->parent != NULL && newname != NULL) {
 
 	/* no renaming of array members */
 	if(node->parent->type == BS_NODE_ARRAY) {
-	    return;
+	    return NULL;
 	}
 
-	uint32_t newhash = BS_MIX_HASH(xxHash32(node->name, node->nameLen), node->parent->hash, node->nameLen);
-	BsToken tok = { (char*)newname, strlen(newname), false };
+	/* so we don't strlen twice... */
+	size_t sl = strlen(newname);
+
+	/* name unchanged */
+	if(!strncmp(newname, node->name, min(node->nameLen, sl))) {
+	    return node;
+	}
+
+	/* generate new name */
+	BsToken tok = { (char*)newname, sl, false };
 	free(node->name);
 	node->name = getTokenData(&tok);
-	node->nameLen = tok.len;
+	node->nameLen = sl;
+
+	uint32_t newhash = BS_MIX_HASH(xxHash32(node->name, node->nameLen), node->parent->hash, node->nameLen);
 
 	/* no need to rehash in the rare case that hash did not change */
 	if(newhash != node->hash) {
 	    bsNodeWalk(dict, node, NULL, NULL, bsRehashCallback);
 	}
 
+	return node;
+
     }
+
+    return NULL;
 
 }
 
 /*
- * dictionary duplication callback. the feedback is a pointer to the new node
+ * dictionary / node duplication callback. the feedback is a pointer to the new node
  * that was created before we started iterating over its children - thanks to
  * the feedback mechanism we always add to the correct node.
  */
-static void *bsDupCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* cont) {
+static void *bsDupCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* stop) {
 
     BsDict *dest = user;
     BsNode* target = feedback;
 
+    /* bsCreate is called as opposed to _bsCreate, which takes care of duplicating the name */
     BsNode* newnode = bsCreateNode(dest, target, node->type, node->name);
 
     if(newnode != NULL) {
@@ -2253,6 +2482,86 @@ static void *bsDupCallback(BsDict *dict, BsNode *node, void* user, void* feedbac
     }
 
     return newnode;
+
+}
+
+/* copy node to new parent, under (optionally) new name */
+BsNode* bsCopyNode(BsDict* dict, BsNode* node, BsNode* newparent, const char* newname) {
+
+    /* ! this whole thing is a total hack and will need to be resolved if this is ever made thread-safe ! */
+
+    /* temporarily set source node's name to new name */
+    char* oldname = node->name;
+
+    if(newparent == NULL) {
+	return NULL;
+    }
+
+    node->name = (newname != NULL && strncmp(newname, node->name, min(node->nameLen, strlen(newname)))) ?
+		    (char*)newname : oldname;
+
+    /* callback takes care of the deep copy */
+    bsNodeWalk(dict, node, dict, newparent, bsDupCallback);
+
+    node->name = oldname;
+
+    /* hack again - we have no way to grab the duplicate from the callback run, so we grab new parent's last child */
+    return newparent->_lastChild;
+
+}
+
+/* move node to new parent, under (optionally) new name */
+BsNode* bsMoveNode(BsDict* dict, BsNode* node, BsNode* newparent, const char* newname) {
+
+    size_t sl = 0;
+
+    if(newname != NULL) {
+        sl = strlen(newname);
+    }
+
+    /* will not move root node and will not attach to NULL parent and will not set empty name */
+    if(newparent == NULL || node->parent == NULL) {
+	return NULL;
+    }
+
+    /* if parent is the same, this is a rename */
+    if(node->parent == newparent) {
+
+	/* only rename if new name differs */
+	if(newname != NULL && strncmp(newname, node->name, min(node->nameLen, sl))) {
+	    bsRenameNode(dict, node, newname);
+	}
+
+	return node;
+
+    }
+
+    /* shift about */
+    LL_REMOVE_DYNAMIC(node->parent, node);
+    if(node->parent->childCount > 0) {
+	node->parent->childCount--;
+    }
+    LL_APPEND_DYNAMIC(newparent, node);
+    node->parent = newparent;
+    newparent->childCount++;
+
+    /* change name if necessary */
+    if(newname != NULL && strncmp(newname, node->name, min(node->nameLen, sl))) {
+	BsToken tok = { (char*)newname, sl, false };
+	free(node->name);
+	node->name = getTokenData(&tok);
+	node->nameLen = sl;
+    }
+
+    /* rehash */
+    uint32_t newhash = BS_MIX_HASH(xxHash32(node->name, node->nameLen), node->parent->hash, node->nameLen);
+
+    /* no need to rehash in the rare case that hash did not change */
+    if(newhash != node->hash) {
+	bsNodeWalk(dict, node, NULL, NULL, bsRehashCallback);
+    }
+
+    return node;
 
 }
 
@@ -2272,8 +2581,8 @@ BsDict* bsDuplicate(BsDict *source, const char* newname, const uint32_t newflags
 
 }
 
-/* test sink - return false to stop the test program */
-bool bsTest() {
+/* test sink - return false to stop the test program after this */
+bool bsTest(BsDict *dict) {
 
     return true;
 

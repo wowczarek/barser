@@ -191,6 +191,7 @@ typedef struct BsDict BsDict;
 
 typedef struct BsNode BsNode;
 struct BsNode {
+
     char *name;				/* node name */
     char *value;			/* node value */
 
@@ -246,12 +247,12 @@ struct BsDict {
  *             before iterating over its children (preorder traversal),
  *             this allows interaction between the callback running
  *             on a node's parent with the callbacks running on the node.
- *       cont: pointer to a boolean. If the callback sets the underlying
- *             bool to false, iteration stops.
+ *       stop: pointer to a boolean. If the callback sets the underlying
+ *             bool to true, iteration stops.
  */
 typedef void* (*BsCallback) (BsDict*, BsNode*, void*, void*, bool*);
 /* use this if you want, but readability will suffer */
-#define BS_CB_ARGS BsDict *dict, BsNode *node, void* user, void* feedback, bool* cont
+#define BS_CB_ARGS BsDict *dict, BsNode *node, void* user, void* feedback, bool* stop
 
 /* TAKE FILE. PUT FILE IN BUFFER. FILE CAN BE "-" FOR STDIN. RETURN BUFFER */
 size_t getFileBuf(char **buf, const char *fileName);
@@ -271,21 +272,18 @@ void bsFreeNode(BsNode *node);
 
 /* duplicate a dictionary, give new name to resulting dictionary */
 BsDict* bsDuplicate(BsDict *source, const char* newname, const uint32_t newflags);
+/* copy node to new parent, under (optionally) new name */
+BsNode* bsCopyNode(BsDict* dict, BsNode* node, BsNode* newparent, const char* newname);
+/* rename a node and recursively reindex if necessary */
+BsNode* bsRenameNode(BsDict* dict, BsNode* node, const char* newname);
+/* move node from current parent to another, under(optionally) new name */
+BsNode* bsMoveNode(BsDict* dict, BsNode* node, BsNode* newparent, const char* newname);
 
 /* parse contents of a char buffer */
 BsState bsParse(BsDict *dict, char *buf, size_t len);
 
 /* display parser error */
 void bsPrintError(BsState *state);
-
-/* run a callback recursively on node, return node where callback stopped the walk */
-BsNode* bsNodeWalk(BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback);
-/* run a callback recursively on node, passing the node's whole path as feedback on every run */
-BsNode* bsNodePWalk(BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback);
-/* run a callback recursively on dictionary, return node where callback stopped the walk */
-BsNode* bsWalk(BsDict *dict, void* user, BsCallback callback);
-/* same, with path passed as feedback */
-BsNode* bsPWalk(BsDict *dict, void* user, BsCallback callback);
 
 /* output dictionary contents to file */
 void bsDump(FILE* fl, BsDict *dict);
@@ -301,8 +299,26 @@ BsNode* bsGetChild(BsDict* dict, BsNode *parent, const char* name);
 /* iteratively grab parent's n-th child (starting from 0!) */
 BsNode* bsNthChild(BsDict* dict, BsNode *parent, const unsigned int childno);
 
-/* rename a node and recursively reindex if necessary */
-void bsRenameNode(BsDict* dict, BsNode* node, const char* newname);
+/* run a callback recursively on node, return node where callback stopped the walk */
+BsNode* bsNodeWalk(BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback);
+/* run a callback recursively on dictionary, return node where callback stopped the walk */
+BsNode* bsWalk(BsDict *dict, void* user, BsCallback callback);
+/* run a callback recursively on node, passing a BsToken with node's full path as feedback */
+BsNode* bsNodePWalk(BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback, bool escape);
+/* same as bsWalk, but every callback is passed a BsToken as feedback, with node's full path */
+BsNode* bsPWalk(BsDict *dict, void* user, BsCallback callback, bool escape);
+/* run a callback recursively on node, return linked list that callback permitted */
+LList* bsNodeFilter(LList* list, BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback);
+/* run a callback recursively on dictionary, return linked list that callback permitted */
+LList* bsFilter(LList *list, BsDict *dict, void* user, BsCallback callback);
+/* run a callback recursively on node, return linked list that callback permitted, callback gets node path */
+LList* bsNodePFilter(LList *list, BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback, bool escape);
+/* run a callback recursively on dictionary, return linked list that callback permitted, callback gets node path */
+LList* bsPFilter(LList *list, BsDict *dict, void* user, BsCallback callback, bool escape);
+/* callback for use with bsFilter, checking if node value contains string */
+void* bsValueContainsCb(BsDict *dict, BsNode *node, void* user, void* feedback, bool* matches);
+/* callback for use with bsFilter, checking if node value contains string */
+void* bsNameContainsCb(BsDict *dict, BsNode *node, void* user, void* feedback, bool* matches);
 
 /*
  * Put BS_PATH_SEP-separated path of given node into out. If out is NULL,
@@ -332,7 +348,7 @@ size_t bsEscapeStr(const char *str, char *out);
 char* bsGetEscapedStr(const char* src);
 
 /* this is a test call to remain here until development is done */
-bool bsTest();
+bool bsTest(BsDict *dict);
 
 #endif /* BARSER_H_ */
 
