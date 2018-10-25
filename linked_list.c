@@ -78,13 +78,14 @@ void llEmpty(LList* list) {
 	free(tmp);
     }
 
+    list->_firstChild = list->_lastChild = NULL;
+
 }
 
 /* free a linked list and all its members */
 void llFree(LList* list) {
 
     if(list != NULL) {
-
 	llEmpty(list);
 	free(list);
     }
@@ -97,15 +98,28 @@ void llAppendItem(LList* list, void* item) {
     if(list != NULL) {
 
 	LListMember *m = llCreateMember();
-    
-	if(m != NULL) {
-	    m->value = item;
-	    LL_APPEND_DYNAMIC(list, m);
-	}
+
+	m->value = item;
+	LL_APPEND_DYNAMIC(list, m);
 
     }
 
 }
+
+/* prepend item to top of list */
+void llPrependItem(LList* list, void* item) {
+
+    if(list != NULL) {
+
+	LListMember *m = llCreateMember();
+
+	m->value = item;
+	LL_PREPEND_DYNAMIC(list, m);
+
+    }
+
+}
+
 
 /* remove item from list */
 void llRemoveItem(LList* list, const void* item) {

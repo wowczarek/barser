@@ -86,6 +86,18 @@
     var->_serial = _serial; \
     _serial++;
 
+/* insert variable to front of statically embedded linked list */
+#define LL_PREPEND_STATIC(var) \
+    var->_next = _first;\
+    var->_prev = NULL;\
+    if(_first != NULL) {\
+	_first->_prev = var;\
+    }\
+    _first = var;\
+    var->_first = &_first; \
+    var->_serial = _serial; \
+    _serial++;
+
 /* append variable to linked list held in the holder variable */
 #define LL_APPEND_DYNAMIC(holder, var) \
     if(holder->_firstChild == NULL) { \
@@ -97,6 +109,16 @@
     } \
     holder->_lastChild = var; \
     var->_next = NULL; \
+    var->_first = &holder->_firstChild;
+
+/* insert variable to front of linked list held in the holder variable */
+#define LL_PREPEND_DYNAMIC(holder, var) \
+    var->_next = holder->_firstChild;\
+    var->_prev = NULL;\
+    if(holder->_firstChild != NULL) {\
+	holder->_firstChild->_prev = var;\
+    }\
+    holder->_firstChild = var;\
     var->_first = &holder->_firstChild;
 
 /* remove variable from a statically embedded list */
@@ -199,6 +221,8 @@ void llFree(LList* list);
 void llEmpty(LList* list);
 /* append item to list */
 void llAppendItem(LList* list, void* item);
+/* prepend item to top of list */
+void llPrependItem(LList* list, void* item);
 /* remove item from list */
 void llRemoveItem(LList* list, const void* item);
 /* remove list member from list */
