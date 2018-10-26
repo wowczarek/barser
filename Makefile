@@ -12,6 +12,7 @@ DEPLIBS = -lbarser
 
 %.o: %.c $(LIBDEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)
+
 all: $(LIBNAME) barser_test barser_example
 
 $(LIBNAME): $(LIBOBJ)
@@ -20,6 +21,7 @@ $(LIBNAME): $(LIBOBJ)
 
 barser_test: $(OBJ1)
 	$(CC) -o $@ $^ -L. $(DEPLIBS) $(CFLAGS)
+
 barser_example: $(OBJ2)
 	$(CC) -o $@ $^ -L. $(DEPLIBS) $(CFLAGS)
 
@@ -41,4 +43,3 @@ debug: all
 
 redebug: CFLAGS+=-g
 redebug: clean all
-
