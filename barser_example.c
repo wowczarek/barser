@@ -26,9 +26,7 @@
 */
 
 #include <stdio.h>
-#include <stdlib.h>
 #include "barser.h"
-
 
 int main(int argc, char **argv) {
 
