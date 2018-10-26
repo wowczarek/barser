@@ -88,9 +88,8 @@ void* bsIndexGet(void *index, const uint32_t hash) {
 /* insert node into index */
 void bsIndexPut(BsDict *dict, BsNode* node) {
 
-    BsNode *n;
+    /* rbInsert returns new tree node on insertion, or existing node if key exists */
     RbNode* inode = rbInsert((RbTree*)(dict->index), node->hash);
-
 
     if(inode == NULL) {
 	fprintf(stderr, "*** %s(): dictionary \"%s\", rbInsert() returned NULL, this should not happen, index is broken ***\n",
@@ -98,36 +97,27 @@ void bsIndexPut(BsDict *dict, BsNode* node) {
 	exit(EXIT_ALLOCERR);
     }
 
-	n = inode->value;
-
-	if(n == NULL) {
-	    inode->value = node;
-	} else {
-
 #ifdef COLL_DEBUG
-	    #include <stdio.h>
-	    BS_GETNP(n, p1);
-	    BS_GETNP(node, p2);
-	    fprintf(stderr, "*** hash collision: '%s' and '%s' share hash 0x%08x\n", p1, p2, node->hash);
-	    dict->collcount++;
-	    /*
-	     * collision count is maintained in the first node in list,
-	     * this is enough for simple hash collision tracking.
-	     */
-	    n->collcount++;
-	    dict->maxcoll = max(dict->maxcoll, n->collcount);
-
+    if(inode->value != NULL) {
+	BsNode *n = inode->value;
+	#include <stdio.h>
+	BS_GETNP(n, p1);
+	BS_GETNP(node, p2);
+	fprintf(stderr, "*** hash collision: '%s' and '%s' share hash 0x%08x\n", p1, p2, node->hash);
+	dict->collcount++;
+	/*
+	 * collision count is maintained in the first node in list,
+	 * this is enough for simple hash collision tracking.
+	 */
+	n->collcount++;
+	dict->maxcoll = max(dict->maxcoll, n->collcount);
+    }
 #endif /* COLL_DEBUG */
 
-	    while (n->_indexNext != NULL) {
-		 n = n->_indexNext;
-	    }
-
-	    n->_indexNext = node;
-
-	}
-
-	node->flags |= BS_INDEXED;
+    /* insert at the top of the list */
+    node->_indexNext = inode->value;
+    inode->value = node;
+    node->flags |= BS_INDEXED;
 
 }
 

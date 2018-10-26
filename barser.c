@@ -787,8 +787,9 @@ static inline BsNode* _bsGetChild(BsDict* dict, BsNode *parent, const char* name
 	/* grab node from index if we can */
 	if(!(dict->flags & BS_NOINDEX)) {
 
+	    /* if we wanted to do a Robin Hood, bsIndexGet() would have to be rewritten to do this part */
 	    for(n = bsIndexGet(dict->index, hash); n != NULL; n = n->_indexNext) {
-		if(n->parent == parent) {
+		if(n->parent == parent && n->nameLen == namelen && !strncmp(name, n->name, namelen)) {
 		    return n;
 		}
 	    }
