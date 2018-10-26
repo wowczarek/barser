@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS+=-std=c99 -Wall -I. -O3 -lrt
+CFLAGS+=-std=c99 -Wall -I. -O3
 LIBNAME = libbarser.a
 
 LIBDEPS = rbt/fq.h rbt/st.h rbt/st_inline.h rbt/rbt.h xxh.h itoa.h linked_list.h  barser_index.h barser.h barser_defaults.h
@@ -8,7 +8,8 @@ LIBOBJ = rbt/fq.o rbt/st.o rbt/rbt.o itoa.o linked_list.o xxh.o barser_index_rbt
 
 OBJ1 = barser_test.o
 OBJ2 = barser_example.o
-DEPLIBS = -lbarser
+OBJ1_DEPLIBS = -lrt
+OBJ2_DEPLIBS =
 
 %.o: %.c $(LIBDEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)
@@ -19,11 +20,11 @@ $(LIBNAME): $(LIBOBJ)
 	ar rc $@ $^
 	ranlib $@
 
-barser_test: $(OBJ1)
-	$(CC) -o $@ $^ -L. $(DEPLIBS) $(CFLAGS)
+barser_test: $(OBJ1) $(LIBNAME)
+	$(CC) -o $@ $^ $(OBJ1_DEPLIBS) $(CFLAGS)
 
-barser_example: $(OBJ2)
-	$(CC) -o $@ $^ -L. $(DEPLIBS) $(CFLAGS)
+barser_example: $(OBJ2) $(LIBNAME)
+	$(CC) -o $@ $^ $(OBJ2_DEPLIBS) $(CFLAGS)
 
 .PHONY: fast
 fast:
