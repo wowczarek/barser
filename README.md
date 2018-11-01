@@ -12,7 +12,9 @@ The "Bastard" in the name refers to the supported format, not the parser itself,
 
 - Barser is work in progress. Barser currently passes feedback tests (generating an output file (2) from an original source input file (1), and then parsing its own output to produce another output (3) : (2) and (3) are identical. Barser can now also consume and reproduce a large and complex JunOS configuration (50k+ stanzas) which is _almost_ readily importable - JunOS native config parser is unfortunately content-sensitive, so a generic approach will not work - or it will, but output will be uglier than the original. A designated JunOS output mode may be introduced later - JunOS was never the target, only an inspiration.
 
-- Barser is "somewhat" heavy on memory use - it is not designed for memory-constrained or embedded systems.
+- Barser is feature-rich and not light on memory use - it is not designed for memory-constrained or embedded systems.
+
+- Barser was designed as a _configuration file_ parser, so that is the project's main focus.
 
 ## Features
 
@@ -125,7 +127,7 @@ cars {
 	}
 }
 ```
-In terms of the resulting tree hierarchy, there is only one `car` branch, and internally the tree really looks like this:
+In terms of the resulting tree hierarchy, instances are single-child branches, and internally the tree really looks like this:
 
 ```
 cars {
@@ -134,21 +136,44 @@ cars {
 		bob {
 			doors 3;
 		}
-
+	}
+	car {
 		steve {
 			doors 5;
 		}
-
+	}
+	car {
 		jake {
 			doors 8;
 		}
 
 	}
-
 }
 ```
+This allows to easily grab all all occurences of "car" (`/cars/car`), but also a single one (`/cars/car/bob`).
 
-Barser supports more similar concepts based on consecutive tokens, and other bits and pieces to accept a format that is easy / fast to type by hand. For example array members need no termination character (`;` - but `,` is also accepted, as per JSON, and so is `|`). So an array can be constructed like this:
+Originally all instances were merged under one branch (and queries were faster - this behavour may return as a parse flag), but this presented problems with output and ordering, also with structure such as:
+
+```
+// this is an instance
+book "Lost Souls" {
+    pages "three hundred thousand billion";
+}
+// this is a leaf with a value
+book "Lost Souls";
+```
+
+JunOS does exactly this: it will mix instances with leaf nodes, which in fact are instances in one context, but leaf nodes in another. The easy way was to use the instance name as node's value and giving the abilities for branches to hold a value - so the instance idea becomes irrelevant (which is what I'm guessing JunOS does). This itself is fine, however it introduces an issue with indexing, as we would either have to start hashing on values (not really necessary), or we dual-hash branches with values - with name once and with name/value twice - but then indexing has to be fully decoupled from node structure (which it isn't to save memory, but we could try tail-sharing and selective append/prepend to index chains), because a node can then exist in the index twice.
+
+Merging instances under one parent worked fine, however the situation above required converting a leaf into an instance after adding the first instance, and thus required a query for every two-token insert, which had a dramatic impact on performance.
+
+Barser supports more similar concepts based on consecutive tokens. Examples:
+
+- `bob cars 5;` results in `bob { cars 5; }`, 
+- `car jake doors 4;` results in ` car jake { doors 4; }`,
+-  _n = 5+_ tokens results in a branch and _(n-1) / 2_ name/value leaf nodes plus one leaf without value if _(n-1)_ is odd.
+
+Barser's whitespace interpretation accept a format that is easy / fast to type by hand. For example array members need no termination character (`;` - but `,` is also accepted, as per JSON, and so is `|`). So an array can be constructed like this:
 
 ```
 cars [ bob steve jake ];
@@ -297,4 +322,4 @@ Freeing dictionary... done.
 Freed in 520960318 ns, 13805884 nodes, 26500836 nodes/s
 ```
 
-Yes, two milliseconds. 1e6 times worse than with the red-black tree index. Naive search times were roughly halved after linked list traversal was implemented to search from both ends of the list - so it was even worse at the start.
+Yes, two milliseconds. 1e3 times worse than with the red-black tree index. Naive search times were roughly halved after linked list traversal was implemented to search from both ends of the list - so it was even worse at the start.
