@@ -113,13 +113,20 @@ memset(name, 0, name ## _len);
 			state.tokenCache[i].data = NULL;\
 		    }\
 		}\
-		state.tokenCount = 0;
+		state.tokenCount = 0;\
+		state.tokenOffset = 0;
 
-/* shorthand to get token data and quoted check */
-#define td(n) getTokenData(&state.tokenCache[n])
-#define ts(n) state.tokenCache[n].data
-#define tq(n) state.tokenCache[n].quoted
-#define tl(n) state.tokenCache[n].len
+/* shorthant to reset token cache */
+#define tokenreset() \
+		state.tokenCount = 0;\
+		state.tokenOffset = 0;\
+		state.flags = 0;
+
+/* shorthand to get token data and quoted check flags */
+#define td(n) getTokenData(&state.tokenCache[n + state.tokenOffset])
+#define ts(n) state.tokenCache[n + state.tokenOffset].data
+#define tq(n) state.tokenCache[n + state.tokenOffset].quoted
+#define tl(n) state.tokenCache[n + state.tokenOffset].len
 
 /* get the existing child of node 'parent' named as token #n in cache */
 #define gch(parent, n) _bsGetChild(dict, parent, state.tokenCache[n].data, state.tokenCache[n].len)
@@ -160,6 +167,51 @@ enum {
 				st->lineno = st->slineno;\
 				st->linepos = st->slinepos;
 
+
+/* ========= static function declarations ========= */
+
+/* initialise parser state */
+static void bsInitState(BsState *state, char* buf, const size_t bufsize);
+/* return a pointer to token data / name, duplicating / copying if necessary */
+static inline char* getTokenData(BsToken *token);
+/* fetch next character from buffer and advance, return it as int or EOF if end reached */
+static inline int bsForward(BsState *state);
+/* peek at the next character without moving forward */
+static inline int bsPeek(BsState *state);
+
+/* dump a quoted string (if quoted) and escape characters where needed */
+static inline int bsDumpQuoted(FILE* fl, char *src, bool quoted);
+/* Dump node contents recursively to a file pointer. */
+static int _bsDumpNode(FILE* fl, BsNode *node, int level);
+/* Create a node in dict at given parent with given name and (optionally) value */
+static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent,
+			const unsigned int type, char* name,
+			const size_t namelen, char* value, size_t valuelen);
+/* [get|check if] parent node has a child with specified name */
+static inline BsNode* _bsGetChild(BsDict* dict, BsNode *parent,
+			const char* name, const size_t namelen);
+/* get a list of children of node with specified name. Returns a dynamic LList* that needs freed */
+static inline LList* _bsGetChildren(LList* out, BsDict* dict, BsNode *parent,
+			const char* name, const size_t namelen);
+/* walk through string @in, and write to + return next token between the 'sep' character */
+static inline BsToken* unescapeToken(BsToken* out, char** in, const char sep);
+/* recursive node rehash callback */
+static void* bsRehashCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* stop);
+/* print error hint from state structure */
+static void bsErrorHint(BsState *state);
+/* main buffer scanner / lexer state machine */
+static inline void bsScan(BsState *state);
+/* expand escape sequences and produce a clean query trimmed on both ends, matching the bsGetPath output */
+static inline size_t cleanupQuery(char* query);
+/* return a new string containing cleaned up query */
+static inline char* getCleanQuery(const char* query);
+/* compute the compound hash of a query path rooted ad node @root */
+static inline uint32_t bsGetPathHash(BsNode* root, const char* query);
+/* dictionary / node duplication callback */
+static void *bsDupCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* stop);
+
+/* ========= function definitions ========= */
+
 /* initialise parser state */
 static void bsInitState(BsState *state, char* buf, const size_t bufsize) {
 
@@ -185,6 +237,8 @@ static void bsInitState(BsState *state, char* buf, const size_t bufsize) {
     state->parseError = BS_PERROR_NONE;
 
     state->tokenCount = 0;
+    state->tokenOffset = 0;
+    state->flags = BS_NONE;
 
 }
 
@@ -405,11 +459,11 @@ static inline int bsDumpQuoted(FILE* fl, char *src, bool quoted) {
 /*
  * This is so inconceivably fugly it makes me want to take a rusty screwdriver
  * to my neck and stab myself repeatedly with it. But it will have to do for now.
+ *
+ * Dump node contents recursively to a file pointer.
  */
-static int
-_bsDumpNode(FILE* fl, BsNode *node, int level)
+static int _bsDumpNode(FILE* fl, BsNode *node, int level)
 {
-    int ret = 0;
     bool noIndentArray = true;
 
     /* allocate enough indentation space for current level + 1 */
@@ -417,7 +471,6 @@ _bsDumpNode(FILE* fl, BsNode *node, int level)
     char indent[ maxwidth + 1];
     BsNode *n = NULL;
     bool inArray = (node->parent != NULL && node->parent->type == BS_NODE_ARRAY);
-    bool inCollection = (node->parent != NULL && node->parent->type == BS_NODE_COLLECTION);
     bool isArray = (node->type == BS_NODE_ARRAY);
     bool hadBranchSibling = inArray && node->_prev != NULL && node->_prev->type != BS_NODE_LEAF;
 
@@ -429,108 +482,79 @@ _bsDumpNode(FILE* fl, BsNode *node, int level)
 #endif /* COLL_DEBUG */
     /* yessir... */
     indent[maxwidth] = '\0';
-    if(node->type != BS_NODE_COLLECTION) {
-	ret = fprintf(fl, "%s", inArray && noIndentArray && !hadBranchSibling ? " " : indent);
-	if(ret < 0) {
-	    return -1;
-	}
+
+	fprintf(fl, "%s", inArray && noIndentArray && !hadBranchSibling ? " " : indent);
+
 	if(node->parent != NULL) {
 
 	    if(!inArray) {
-		if(inCollection) {
-		    ret = bsDumpQuoted(fl, node->parent->name, node->parent->flags & BS_QUOTED_NAME);
-		    if(ret < 0) {
-			return -1;
-		    }
-		    ret = fprintf(fl, " ");
-		    if(ret < 0) {
-			return -1;
-		    }
 
+		if(node->flags & BS_INACTIVE) {
+		    fprintf(fl, "inactive: ");
 		}
-		ret = bsDumpQuoted(fl, node->name, node->flags & BS_QUOTED_NAME);
-		if(ret < 0) {
-		    return -1;
-		}
-		if(inCollection) {
+		
+		bsDumpQuoted(fl, node->name, node->flags & BS_QUOTED_NAME);
+
+		if(node->type == BS_NODE_INSTANCE) {
+		    fprintf(fl, " ");
+
+		    node = node->_firstChild;
+		    inArray = (node->parent != NULL && node->parent->type == BS_NODE_ARRAY);
+		    isArray = (node->type == BS_NODE_ARRAY);
+
+		    bsDumpQuoted(fl, node->name, node->flags & BS_QUOTED_NAME);
+
 		    if(node->childCount == 1) {
 			BsNode *tmp = (BsNode*)node->_firstChild;
 			if(tmp != NULL && tmp->type == BS_NODE_LEAF) {
-			    ret = fprintf(fl, " ");
-			    if(ret < 0) {
-				return -1;
-			    }
-			    ret = bsDumpQuoted(fl, tmp->name, tmp->flags & BS_QUOTED_NAME);
-			    if(ret < 0) {
-				return -1;
-			    }
+			    fprintf(fl, " ");
+
+			    bsDumpQuoted(fl, tmp->name, tmp->flags & BS_QUOTED_NAME);
+
 			    if(tmp->value != NULL) {
-				ret = fprintf(fl, " ");
-				if(ret < 0) {
-				    return -1;
-				}
-				ret = bsDumpQuoted(fl, tmp->value, tmp->flags & BS_QUOTED_VALUE);
-				if(ret < 0) {
-				    return -1;
-				}
+				fprintf(fl, " ");
+
+				bsDumpQuoted(fl, tmp->value, tmp->flags & BS_QUOTED_VALUE);
 
 			    }
-			    ret = fprintf(fl, "%c\n", BS_ENDVAL_CHAR);
-			    if(ret < 0) {
-				return -1;
-			    }
+
+			    fprintf(fl, "%c\n", BS_ENDVAL_CHAR);
+
 			    return 0;
 			}
 
 		    }
+
+
 		}
+
 	    }
 	}
-
-    }
 
     if(node->childCount == 0) {
 	if(node->type != BS_NODE_ROOT) {
 
-	    if(node->value && strlen(node->value)) {
+	    if(node->value && node->valueLen > 0) {
 
 		if(!inArray) {
-		    ret = fprintf(fl, " ");
-		    if(ret < 0) {
-			return -1;
-		    }
+		    fprintf(fl, " ");
 		}
 
 		bsDumpQuoted(fl, node->value, node->flags & BS_QUOTED_VALUE);
-		if(ret < 0) {
-		    return -1;
+
+		if(!inArray) {
+		    fprintf(fl, "%c", BS_ENDVAL_CHAR);
 		}
 
 		if(!inArray) {
-		    ret = fprintf(fl, "%c", BS_ENDVAL_CHAR);
-		    if(ret < 0) {
-			return -1;
-		    }
-		}
-
-		if(!inArray) {
-		    ret = fprintf(fl, "\n");
-		    if(ret < 0) {
-			return -1;
-		    }
+		    fprintf(fl, "\n");
 		}
 	    } else {
 		if(!inArray) {
-		    ret = fprintf(fl, "%c", BS_ENDVAL_CHAR);
-		    if(ret < 0) {
-			return -1;
-		    }
+		    fprintf(fl, "%c", BS_ENDVAL_CHAR);
 		}
 		if(!isArray || !noIndentArray) {
-		    ret = fprintf(fl, "\n");
-		    if(ret < 0) {
-			return -1;
-		    }
+		    fprintf(fl, "\n");
 		}
 
 	    }
@@ -540,75 +564,49 @@ _bsDumpNode(FILE* fl, BsNode *node, int level)
     } else {
 
 	if(node->type != BS_NODE_ROOT) {
-	    if(node->type != BS_NODE_COLLECTION) {
-		ret = fprintf(fl,  "%s%c", strlen(node->name) ? " " : "",
+		fprintf(fl,  "%s%c", strlen(node->name) ? " " : "",
 		    isArray ? BS_STARTARRAY_CHAR : BS_STARTBLOCK_CHAR);
-		if(ret < 0) {
-		    return -1;
-		}
+
 		if(!isArray || !noIndentArray) {
-		    ret = fprintf(fl, "\n");
-		    if(ret < 0) {
-			return -1;
-		    }
+		    fprintf(fl, "\n");
 		}
-	    }
 	}
 
 	/* increase indent in case if we want to print something here later */
 	memset(indent + level * BS_INDENT_WIDTH, BS_INDENT_CHAR, BS_INDENT_WIDTH);
 	LL_FOREACH_DYNAMIC(node, n) {
 
-	    if(node->type == BS_NODE_COLLECTION) {
-		ret = _bsDumpNode(fl, n, level);
-		if(ret < 0) {
+		if(_bsDumpNode(fl, n, level + (node->parent != NULL)) < 0) {
 		    return -1;
 		}
-	    } else {
-		if(n->parent != NULL && n->parent->parent != NULL && n->parent->parent->type == BS_NODE_COLLECTION) {
-//		    fprintf(fl, "//boom\n");
-		}
-		ret = _bsDumpNode(fl, n, level + (node->parent != NULL));
-		if(ret < 0) {
-		    return -1;
-		}
-	    }
 	}
+
 	/* decrease indent again */
 	memset(indent + (level) * BS_INDENT_WIDTH, '\0', BS_INDENT_WIDTH);
 	if(node->type != BS_NODE_ROOT) {
-	    if(node->type != BS_NODE_COLLECTION) {
-		ret = fprintf(fl, "%s", isArray && noIndentArray ? " " : indent);
-		if(ret < 0) {
-			return -1;
-		}
+
+		fprintf(fl, "%s", isArray && noIndentArray ? " " : indent);
+
 		if(isArray) {
-		    ret = fprintf(fl, "%c", BS_ENDARRAY_CHAR);
-		    if(ret < 0) {
-			return -1;
-		    }
+
+		    fprintf(fl, "%c", BS_ENDARRAY_CHAR);
+
 		    if(!inArray) {
-			ret = fprintf(fl, "%c", BS_ENDVAL_CHAR);
-			if(ret < 0) {
-			    return -1;
-			}
+			fprintf(fl, "%c", BS_ENDVAL_CHAR);
 		    }
 		} else {
-		    ret = fprintf(fl, "%c", BS_ENDBLOCK_CHAR);
-		    if(ret < 0) {
-			return -1;
-		    }
+		    fprintf(fl, "%c", BS_ENDBLOCK_CHAR);
 
 		}
-	    }
-	}
-	if(node->type != BS_NODE_COLLECTION) {
-	    ret = fprintf(fl, "\n");
-	    if(ret < 0) {
-		return -1;
-	    }
+
 	}
 
+	fprintf(fl, "\n");
+
+    }
+
+    if(ferror(fl)) {
+	return -1;
     }
 
     return 0;
@@ -650,17 +648,19 @@ void bsFreeNode(BsNode *node)
 }
 
 /*
- * Create a node in dict with parent parent of type type using name 'name' of length 'namelen'.
- * This is the internal version of this function (underscore), which only attaches the name
- * to the node. If called directly, the name should have been passed throuh getTokenData() first,
+ * Create a node in dict with parent parent of type type using name 'name' of length 'namelen',
+ * and with a value of 'value' and length 'valuelen'. This is the internal version of this function
+ * (underscore), which only attaches the name + value to the node. If called directly,
+ * the name should have been passed throuh getTokenData() first or otherwise be malloc'd,
  * so that the name is guaranteed not to come from a buffer that will later be destroyed.
- *
+ * If zero lengths are given for namelen or valuelen, strlen() is performed.
  */
-static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, char* name, const size_t namelen)
+static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, char* name, const size_t namelen, char* value, size_t valuelen)
 {
 
     BsNode *ret;
     size_t slen = 0;
+    size_t vlen = 0;
 
     if(dict == NULL) {
 	return NULL;
@@ -678,6 +678,7 @@ static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned
     LL_CLEAR_MEMBER(ret);
 
     ret->nameLen = 0;
+    ret->valueLen = 0;
     ret->childCount = 0;
     ret->type = type;
     ret->flags = 0;
@@ -685,6 +686,15 @@ static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned
     ret->collcount = 0;
 #endif /* COLL_DEBUG */
     if(parent != NULL) {
+
+	/* inherit flags */
+
+	/* parent's inheritable flags shifted */
+	unsigned int iflags = (parent->flags & BS_INHERITED_FLAGS) << BS_INHERITED_SHIFT;
+	/* also apply parent's already shifted inherited flags */
+	iflags |= parent->flags & (BS_INHERITED_FLAGS << BS_INHERITED_SHIFT);
+
+	ret->flags |= iflags;
 
 	/* if we are adding an array member, call it by number, ignoring the name */
 	if(parent->type == BS_NODE_ARRAY) {
@@ -698,7 +708,9 @@ static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned
 	    if(name == NULL) {
 		goto onerror;
 	    }
+
 	    ret->name = name;
+
 	    if(namelen == 0) {
 		slen = strlen(name);
 	    } else {
@@ -706,10 +718,25 @@ static inline BsNode* _bsCreateNode(BsDict *dict, BsNode *parent, const unsigned
 	    }
 	}
 
+	ret->value = value;
+
+	if(value != NULL && valuelen == 0) {
+	    vlen = strlen(value);
+	} else {
+	    vlen = valuelen;
+	}
+
 	/* mix this node's name's hash with parent's hash */
 	ret->hash = BS_MIX_HASH(xxHash32(ret->name, slen), parent->hash, slen);
 
+#if 0
+	/* if this is an instance, also mix it with value */
+	if(type == BS_NODE_INSTANCE) {
+	    ret->hash = BS_MIX_HASH(xxHash32(ret->value, vlen), ret->hash, vlen);
+	}
+#endif
 	ret->nameLen = slen;
+	ret->valueLen = vlen;
 
 	if(!(dict->flags & BS_NOINDEX)) {
 	    bsIndexPut(dict, ret);
@@ -750,27 +777,50 @@ onerror:
  * If the parent is an array, we do not need a name. If it's not, the name is duplicated
  * and length is calculated.
  */
-BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, const char* name) {
+BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, const char* name, const char *value) {
 
-    char* out = NULL;
-    size_t slen = 0;
+    char* nout = NULL;
+    size_t nlen = 0;
+    char* vout = NULL;
+    size_t vlen = 0;
+
+    if(parent == NULL) {
+	return NULL;
+    }
+
+    if(value != NULL) {
+
+	/* only leafs and instances can have values */
+	if(type != BS_NODE_LEAF) {
+	    return NULL;
+	}
+
+        vlen = strlen(name);
+        xmalloc(vout, vlen + 1);
+	if(vlen > 0) {
+    	    memcpy(vout, value, vlen);
+	}
+	*(vout + vlen) = '\0';
+    }
+
     if(parent != NULL && parent->type == BS_NODE_ARRAY) {
 
-	return _bsCreateNode(dict, parent, type, NULL, 0);
+	return _bsCreateNode(dict, parent, type, NULL, 0, vout, vlen);
 
+    }  else {
+
+	if(name == NULL || ((nlen = strlen(name)) == 0)) {
+	    xmalloc(nout, 1);
+	} else {
+    	    nlen = strlen(name);
+    	    xmalloc(nout, nlen + 1);
+    	    memcpy(nout, name, nlen);
+	}
+
+	*(nout + nlen) = '\0';
+
+	return _bsCreateNode(dict, parent, type, nout, nlen, vout, vlen);
     }
-
-    if(name == NULL || ((slen = strlen(name)) == 0)) {
-	xmalloc(out, 1);
-    } else {
-        slen = strlen(name);
-        xmalloc(out, slen + 1);
-        memcpy(out, name, slen);
-    }
-
-    *(out + slen) = '\0';
-
-    return _bsCreateNode(dict, parent, type, out, slen);
 
 }
 
@@ -840,6 +890,77 @@ static inline BsNode* _bsGetChild(BsDict* dict, BsNode *parent, const char* name
 
 }
 
+/* get a list of children of node with specified name. Returns a dynamic LList* that needs freed */
+static inline LList* _bsGetChildren(LList* out, BsDict* dict, BsNode *parent, const char* name, const size_t namelen) {
+
+    uint32_t hash;
+    BsNode *n, *m;
+
+    if(out == NULL) {
+	out = llCreate();
+    }
+
+    if(name != NULL && namelen > 0) {
+
+	hash = BS_MIX_HASH(xxHash32(name, namelen), parent->hash, namelen);
+
+	/* grab node from index if we can */
+	if(!(dict->flags & BS_NOINDEX)) {
+
+	    /* if we wanted to do a Robin Hood, bsIndexGet() would have to be rewritten to do that (put last item in front) */
+	    for(n = bsIndexGet(dict->index, hash); n != NULL; n = n->_indexNext) {
+		if(n->parent == parent && n->nameLen == namelen && !strncmp(name, n->name, namelen)) {
+		    llAppendItem(out, n);
+		}
+	    }
+
+	/* otherwise do a naive search */
+	} else {
+
+	    /*
+	     * (todo: investigate skip lists - but that would be an index)
+	     * for now, search from both ends of the list simultaneously.
+	     */
+
+	    n = parent->_firstChild;
+	    m = parent->_lastChild;
+
+	    /* until we meet */
+	    while( m != NULL && n != NULL) {
+
+		if(n->hash == hash && n->nameLen == namelen && !strncmp(name, n->name, namelen)) {
+		    llAppendItem(out, n);
+		}
+
+		/* we've met */
+		if(m == n) {
+		    break;
+		}
+
+		if(m->hash == hash && m->nameLen == namelen && !strncmp(name, m->name, namelen)) {
+		    llAppendItem(out, m);
+		}
+
+		n = n->_next;
+
+		/* we're about to pass each other */
+		if(m == n) {
+		    break;
+		}
+
+		m = m->_prev;
+
+	    }
+	
+	}
+
+    }
+
+    return out;
+
+}
+
+
 /* delete node from the dictionary */
 unsigned int bsDeleteNode(BsDict *dict, BsNode *node)
 {
@@ -893,7 +1014,7 @@ BsDict* bsCreate(const char *name, const uint32_t flags) {
     ret->flags = flags;
 
     /* create the root node */
-    _bsCreateNode(ret, NULL, BS_NODE_ROOT,NULL,0);
+    _bsCreateNode(ret, NULL, BS_NODE_ROOT,NULL,0,NULL,0);
 
     /* create the index */
     if(!(flags & BS_NOINDEX)) {
@@ -1114,7 +1235,7 @@ finalise:
 
 }
 
-/* node rehash callback */
+/* recursive node rehash callback */
 static void* bsRehashCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* stop) {
 
     if(node->parent != NULL) {
@@ -1269,7 +1390,11 @@ BsNode*  bsPWalk(BsDict *dict, void* user, BsCallback callback, bool escape) {
     return bsNodePWalk(dict, dict->root, user, NULL, callback, escape);
 }
 
-/* run a callback recursively on node, return linked list that callback permitted, callback gets node path */
+/*
+ * run a callback recursively on node, return linked list of nodes
+ * that callback permitted, callback gets node path. If NULL passed as list,
+ * create one, if not - append.
+ */
 LList* bsNodePFilter(LList *list, BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback, bool escape) {
 
     BsToken *ptok = feedback;
@@ -1300,6 +1425,7 @@ LList* bsNodePFilter(LList *list, BsDict *dict, BsNode *node, void* user, void *
 	memcpy(name, ptok->data, ptok->len);
 	name[ptok->len]='/';
     }
+
     if(sl > 0) {
 	tok.data = name;
 	if(escape) {
@@ -1374,7 +1500,7 @@ void* bsNameContainsCb(BsDict *dict, BsNode *node, void* user, void* feedback, b
 
 }
 
-/* print error hint */
+/* print error hint from state structure */
 static void bsErrorHint(BsState *state) {
 
 	size_t lw = BS_ERRORDUMP_LINEWIDTH;
@@ -1421,7 +1547,7 @@ void bsPrintError(BsState *state) {
 
     } else {
 
-	fprintf(stderr, "Parser error: ");
+	fprintf(stderr, "Parse error: ");
 	switch (state->parseError) {
 	    case BS_PERROR_EOF:
 
@@ -1451,6 +1577,7 @@ void bsPrintError(BsState *state) {
 		fprintf(stderr, "Too many consecutive identifiers");
 		break;
 	    case BS_PERROR_EXP_ID:
+		restorestate(state);
 		fprintf(stderr, "Expected node name / identifier");
 		break;
 	    case BS_PERROR_UNEXP_ID:
@@ -1474,7 +1601,7 @@ void bsPrintError(BsState *state) {
 
 }
 
-/* string scanner state machine */
+/* main buffer scanner / lexer state machine */
 static inline void bsScan(BsState *state) {
 
     size_t ssize;
@@ -1727,7 +1854,7 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
     PST_DECL(nodestack, BsNode*, 16);
 
     BsNode *head;
-    BsNode *newnode, *newnode2;
+    BsNode *newnode;
     BsState state;
 
     bsInitState(&state, buf, len);
@@ -1755,15 +1882,23 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 	    /* we got a token or quoted string - increment counter and check if we can handle the count */
 	    case BS_GOT_TOKEN:
 
+		/* check for node modifiers */
+		if(state.tokenCount == 0 && state.prev == BS_MODIFIER_CHAR) {
+		    /* "inactive" modifier */
+		    if(!strncmp(ts(0), "inactive", tl(0) - 1)) {
+			state.flags |= BS_INACTIVE;
+			state.tokenOffset++;
+		    }
+		}
+
 		if(++state.tokenCount == BS_MAX_TOKENS) {
 		    /* we can have as many tokens as we want when in an array, add them in batches */
 		    if(head->type == BS_NODE_ARRAY) {
-			for(int i = 0; i < state.tokenCount; i++) {
-			    newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0);
-			    newnode->value = td(i);
-			    newnode->flags = BS_QUOTED_VALUE & tq(i);
+			for(int i = state.tokenOffset; i < state.tokenCount; i++) {
+			    newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0, td(i), tl(i));
+			    newnode->flags |= BS_QUOTED_VALUE & tq(i);
 			}
-			state.tokenCount = 0;
+			tokenreset();
 		    } else{
 			state.parseEvent = BS_ERROR;
 			state.parseError = BS_PERROR_TOKENS;
@@ -1785,56 +1920,54 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 		if(head->type == BS_NODE_ARRAY) {
 
 		    /* first insert any existing tokens as array leaves */
-		    for(int i = 0; i < state.tokenCount; i++) {
-			newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0);
-			newnode->value = td(i);
-			newnode->flags = BS_QUOTED_VALUE & tq(i);
+		    for(int i = state.tokenOffset; i < state.tokenCount; i++) {
+			newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0, td(i), tl(i));
+			newnode->flags |= BS_QUOTED_VALUE & tq(i);
+			newnode->flags |= state.flags;
 		    }
 
 		    /* now enter into an unnamed branch which is a new member of the array */
 		    PST_PUSH_GROW(nodestack, head); /* save current position */
-		    newnode = _bsCreateNode(dict, head, BS_NODE_BRANCH, NULL, 0);
+		    newnode = _bsCreateNode(dict, head, BS_NODE_BRANCH, NULL, 0, NULL, 0);
 		    head = newnode;
 
 		} else {
-		    switch(state.tokenCount) {
+		    switch(state.tokenCount - state.tokenOffset) {
 			case 1:
 			    PST_PUSH_GROW(nodestack, head);
 			    /*
 			     * the macros td, tq and tl are defined at the top of this file. They simply
 			     * grab the data, quoted field and len field from the given item in token cache.
 			     */
-			    newnode = _bsCreateNode(dict, head, BS_NODE_BRANCH, td(0), tl(0));
-			    newnode->flags = BS_QUOTED_NAME & tq(0);
+			    newnode = _bsCreateNode(dict, head, BS_NODE_BRANCH, td(0), tl(0), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(0);
+			    newnode->flags |= state.flags;
 			    head = newnode;
 			    break;
 			case 2:
 			    PST_PUSH_GROW(nodestack, head);
-			    if((newnode = gch(head, 0)) == NULL) {
-				newnode = _bsCreateNode(dict, head, BS_NODE_COLLECTION, td(0), tl(0));
-			    }
-			    newnode->flags = BS_QUOTED_NAME & tq(0);
-			    newnode = _bsCreateNode(dict, newnode, BS_NODE_BRANCH, td(1), tl(1));
-			    newnode->flags = BS_QUOTED_NAME & tq(1);
+			    newnode = _bsCreateNode(dict, head, BS_NODE_INSTANCE, td(0), tl(0), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(0);
+			    newnode->flags |= state.flags;
+			    newnode = _bsCreateNode(dict, newnode, BS_NODE_BRANCH, td(1), tl(1), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(1);
 			    head = newnode;
 			    break;
 			case 3:
+			    /* or should we swap instance and branch - compare with JunOS */
 			    PST_PUSH_GROW(nodestack, head);
-			    if((newnode = gch(head, 0)) == NULL) {
-				newnode = _bsCreateNode(dict, head, BS_NODE_COLLECTION, td(0), tl(0));
-			    }
-			    newnode->flags = BS_QUOTED_NAME & tq(0);
-			    if((newnode2 = gch(newnode, 1)) == NULL) {
-				newnode2 = _bsCreateNode(dict, newnode, BS_NODE_COLLECTION, td(1), tl(1));
-			    }
-			    newnode2->flags = BS_QUOTED_NAME & tq(1);
-			    newnode = _bsCreateNode(dict, newnode2, BS_NODE_BRANCH, td(2), tl(2));
-			    newnode->flags = BS_QUOTED_NAME & tq(2);
-			    head = newnode;
+			    newnode = _bsCreateNode(dict, head, BS_NODE_INSTANCE, td(0), tl(0), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(0);
+			    newnode->flags |= state.flags;
+			    newnode = _bsCreateNode(dict, newnode, BS_NODE_BRANCH, td(1), tl(1), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(1);
+			    newnode = _bsCreateNode(dict, newnode, BS_NODE_BRANCH, td(2), tl(2), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(2);
+			    head = newnode;			
 			    break;
 			/* unnamed branch? only at root level and only once */
 			case 0:
-			    if(head == dict->root && nodestack_sh == 0) {
+			    if(state.tokenCount == 0 && head == dict->root && nodestack_sh == 0) {
 				/* imaginary descent. This allows us to put empty {}s around the whole content */
 				PST_PUSH_GROW(nodestack, head);
 			    /* nope. */
@@ -1849,7 +1982,7 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 		    }
 		}
 		/* we don't need the tokens anymore */
-		state.tokenCount = 0;
+		tokenreset();
 		break;
 
 	    /*
@@ -1889,19 +2022,22 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 		/* arrays are special that way, a single token is a leaf with a value */
 		if(head->type == BS_NODE_ARRAY) {
 
-		    switch(state.tokenCount) {
+		    switch(state.tokenCount - state.tokenOffset) {
 
 			case 1:
-			    newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0);
+			    newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0, NULL, 0);
+			    newnode->flags |= state.flags;
 			    newnode->value = td(0);
-			    newnode->flags = BS_QUOTED_VALUE & tq(0);
+			    newnode->valueLen = tl(0);
+			    newnode->flags |= BS_QUOTED_VALUE & tq(0);
 			    break;
 			/* this is only a courtesy thing. array members are always unnamed - we only take the value */
 			case 2:
-			    newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0);
-			    newnode->value = td(1);
-			    newnode->flags = BS_QUOTED_VALUE & tq(1);
+			    newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0, td(1), tl(1));
+			    newnode->flags |= BS_QUOTED_VALUE & tq(1);
+			    newnode->flags |= state.flags;
 			    break;
+			/* stray endval character, ignore */
 			case 0:
 			    break;
 			default:
@@ -1912,62 +2048,39 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 
 		} else {
 
-		    switch(state.tokenCount) {
+		    switch(state.tokenCount - state.tokenOffset) {
 
 			case 1:
-			    newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, td(0), tl(0));
-			    newnode->flags = BS_QUOTED_NAME & tq(0);
+			    newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, td(0), tl(0), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(0);
+			    newnode->flags |= state.flags;
 			    break;
 			case 2:
-			    /* two tokens, node does not exist at current parent = leaf with value */
-			    if((newnode = gch(head, 0)) == NULL) {
-				newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, td(0), tl(0));
-				newnode->flags = BS_QUOTED_NAME & tq(0);
-				newnode->value = td(1);
-				newnode->flags |= BS_QUOTED_VALUE & tq(1);
-			    /* two tokens, node does exist at parent */
-			    } else {
-				/* convert existing node to collection */
-				newnode->type = BS_NODE_COLLECTION;
-				newnode->flags = BS_QUOTED_NAME & tq(0);
-				/* convert existing value to new leaf */
-				if(newnode->value != NULL) {
-				    newnode2 = _bsCreateNode(dict, newnode, BS_NODE_LEAF, newnode->value, 0);
-				    newnode2->flags = newnode->flags;
-				    /* remove value from existing node */
-				    newnode->value = NULL;
-				}
-				/* create a new leaf with no value */
-				newnode2 = _bsCreateNode(dict, newnode, BS_NODE_LEAF, td(1), tl(1));
-				newnode2->flags = BS_QUOTED_NAME & tq(1);
-			    }
+			    newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, td(0), tl(0), td(1), tl(1));
+			    newnode->flags |= BS_QUOTED_NAME & tq(0);
+			    newnode->flags |= BS_QUOTED_VALUE & tq(1);
+			    newnode->flags |= state.flags;
 			    break;
 			case 3:
-			    if((newnode = gch(head, 0)) == NULL) {
-				newnode = _bsCreateNode(dict, head, BS_NODE_COLLECTION, td(0), tl(0));
-			    }
-			    newnode->flags = BS_QUOTED_NAME & tq(0);
-			    if((newnode2 = gch(newnode, 1)) == NULL) {
-				newnode2 = _bsCreateNode(dict, newnode, BS_NODE_BRANCH, td(1), tl(1));
-			    }
-			    newnode2->flags = BS_QUOTED_NAME & tq(1);
-			    newnode = _bsCreateNode(dict, newnode2, BS_NODE_LEAF, td(2), tl(2));
+			    newnode = _bsCreateNode(dict, head, BS_NODE_INSTANCE, td(0), tl(0), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(0);
+			    newnode->flags |= state.flags;
+			    newnode = _bsCreateNode(dict, newnode, BS_NODE_BRANCH, td(1), tl(1), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(1);
+			    newnode = _bsCreateNode(dict, newnode, BS_NODE_LEAF, td(2), tl(2), NULL, 0);
 			    newnode->flags |= BS_QUOTED_NAME & tq(2);
 			    break;
 			case 4:
-			    if((newnode = gch(head, 0)) == NULL) {
-				newnode = _bsCreateNode(dict, head, BS_NODE_COLLECTION, td(0), tl(0));
-			    }
-			    newnode->flags = BS_QUOTED_NAME & tq(0);
-			    if((newnode2 = gch(newnode, 1)) == NULL) {
-				newnode2 = _bsCreateNode(dict, newnode, BS_NODE_BRANCH, td(1), tl(1));
-			    }
-			    newnode2->flags = BS_QUOTED_NAME & tq(1);
-			    newnode = _bsCreateNode(dict, newnode2, BS_NODE_LEAF, td(2), tl(2));
-			    newnode->flags = BS_QUOTED_NAME & tq(2);
-			    newnode->value = td(3);
+			    newnode = _bsCreateNode(dict, head, BS_NODE_INSTANCE, td(0), tl(0), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(0);
+			    newnode->flags |= state.flags;
+			    newnode = _bsCreateNode(dict, newnode, BS_NODE_BRANCH, td(1), tl(1), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(1);
+			    newnode = _bsCreateNode(dict, newnode, BS_NODE_LEAF, td(2), tl(2), td(3), tl(3));
+			    newnode->flags |= BS_QUOTED_NAME & tq(2);
 			    newnode->flags |= BS_QUOTED_VALUE & tq(3);
 			    break;
+			/* stray endval character, ignore */
 			case 0:
 			    break;
 
@@ -1986,19 +2099,22 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 				* 5+ consecutive tokens we treat as branch with (n-1) / 2 leaf-value pairs,
 				* if the number is odd, the last leaf has no value.
 				*/
-				newnode = _bsCreateNode(dict, head, BS_NODE_BRANCH, td(0), tl(0));
+				newnode = _bsCreateNode(dict, head, BS_NODE_BRANCH, td(0), tl(0), NULL, 0);
 				newnode->flags |= BS_QUOTED_NAME & tq(0);
+				newnode->flags |= state.flags;
 
 				BsNode *tmphead = newnode;
 
-				for(int i = 1; i < state.tokenCount; i++) {
+				for(int i = state.tokenOffset + 1; i < state.tokenCount; i++) {
 
-				    newnode = _bsCreateNode(dict, tmphead, BS_NODE_LEAF, td(i), tl(i));
-				    newnode->flags = BS_QUOTED_NAME & tq(i);
-
-				    if(++i < state.tokenCount) {
-					newnode->value = td(i);
-					newnode->flags |= BS_QUOTED_VALUE & tq(i);
+				    if((i + 1) < state.tokenCount) {
+					newnode = _bsCreateNode(dict, tmphead, BS_NODE_LEAF, td(i), tl(i), td(i+1), tl(i+1));
+					newnode->flags |= BS_QUOTED_NAME & tq(i);
+					newnode->flags |= BS_QUOTED_VALUE & tq(i+1);
+					i++;
+				    } else {
+					newnode = _bsCreateNode(dict, tmphead, BS_NODE_LEAF, td(i), tl(i), NULL, 0);
+					newnode->flags |= BS_QUOTED_NAME & tq(i);
 				    }
 				}
 
@@ -2022,7 +2138,7 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 		    head = PST_POP(nodestack);
 		}
 
-		state.tokenCount = 0;
+		tokenreset();
 		break;
 
 	    /* array start block i.e. '[' */
@@ -2032,44 +2148,44 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 		if(head->type == BS_NODE_ARRAY) {
 
 		    /* first insert any existing tokens as array leaves */
-		    for(int i = 0; i < state.tokenCount; i++) {
-			newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0);
-			newnode->value = td(i);
-			newnode->flags = BS_QUOTED_VALUE & tq(i);
+		    for(int i = state.tokenOffset; i < state.tokenCount; i++) {
+			newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0, td(i), tl(i));
+			newnode->flags |= BS_QUOTED_VALUE & tq(i);
 		    }
 
 		    /* now enter into an unnamed array which is a new member of the upper array */
 		    PST_PUSH_GROW(nodestack, head); /* save current position */
-		    newnode = _bsCreateNode(dict, head, BS_NODE_ARRAY, NULL,0);
+		    newnode = _bsCreateNode(dict, head, BS_NODE_ARRAY, NULL,0, NULL, 0);
 		    head = newnode;
 
 		} else {
 
-		    switch(state.tokenCount) {
+		    switch(state.tokenCount - state.tokenOffset) {
 			case 1:
 			    PST_PUSH_GROW(nodestack, head);
-			    newnode = _bsCreateNode(dict, head, BS_NODE_ARRAY, td(0), tl(0));
-			    newnode->flags = BS_QUOTED_NAME & tq(0);
+			    newnode = _bsCreateNode(dict, head, BS_NODE_ARRAY, td(0), tl(0), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(0);
+			    newnode->flags |= state.flags;
 			    head = newnode;
 			    break;
 			case 2:
 			    PST_PUSH_GROW(nodestack, head);
-			    newnode = _bsCreateNode(dict, head, BS_NODE_BRANCH, td(0), tl(0));
-			    newnode->flags = BS_QUOTED_NAME & tq(0);
-			    newnode = _bsCreateNode(dict, newnode, BS_NODE_ARRAY, td(1), tl(1));
-			    newnode->flags = BS_QUOTED_NAME & tq(1);
+			    newnode = _bsCreateNode(dict, head, BS_NODE_INSTANCE, td(0), tl(0), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(0);
+			    newnode->flags |= state.flags;
+			    newnode = _bsCreateNode(dict, newnode, BS_NODE_ARRAY, td(1), tl(1), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(1);
 			    head = newnode;
 			    break;
 			case 3:
 			    PST_PUSH_GROW(nodestack, head);
-			    if((newnode = gch(head, 0)) == NULL) {
-				newnode = _bsCreateNode(dict, head, BS_NODE_COLLECTION, td(0), tl(0));
-			    }
-			    newnode->flags = BS_QUOTED_NAME & tq(0);
-			    newnode = _bsCreateNode(dict, newnode, BS_NODE_BRANCH, td(1), tl(1));
-			    newnode->flags = BS_QUOTED_NAME & tq(1);
-			    newnode = _bsCreateNode(dict, newnode, BS_NODE_ARRAY, td(2), tl(2));
-			    newnode->flags = BS_QUOTED_NAME & tq(2);
+			    newnode = _bsCreateNode(dict, head, BS_NODE_INSTANCE, td(0), tl(0), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(0);
+			    newnode->flags |= state.flags;
+			    newnode = _bsCreateNode(dict, newnode, BS_NODE_BRANCH, td(1), tl(1), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(1);
+			    newnode = _bsCreateNode(dict, newnode, BS_NODE_ARRAY, td(2), tl(2), NULL, 0);
+			    newnode->flags |= BS_QUOTED_NAME & tq(2);
 			    head = newnode;
 			    break;
 			/* unnamed array?  nope. */
@@ -2083,7 +2199,7 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 
 		}
 
-		state.tokenCount = 0;
+		tokenreset();
 
 		break;
 
@@ -2101,10 +2217,9 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 		 * any leftover tokens are added as array leaves. This means that an array can be defined
 		 * as a list of whitespace-separated tokens.
 		 */
-		for(int i = 0; i < state.tokenCount; i++) {
-		    newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0);
-		    newnode->value = td(i);
-		    newnode->flags = BS_QUOTED_VALUE & tq(i);
+		for(int i = state.tokenOffset; i < state.tokenCount; i++) {
+		    newnode = _bsCreateNode(dict, head, BS_NODE_LEAF, NULL, 0, td(i), tl(i));
+		    newnode->flags |= BS_QUOTED_VALUE & tq(i);
 		}
 
 		/* 
@@ -2121,7 +2236,7 @@ BsState bsParse(BsDict *dict, char *buf, const size_t len) {
 		/* return to last branching point */
 		head = PST_POP(nodestack);
 
-		state.tokenCount = 0;
+		tokenreset();
 
 		break;
 
@@ -2180,7 +2295,24 @@ size_t bsGetPath(BsNode *node, char* out, const size_t outlen) {
 	    pathlen++;
 	}
 
+#if 0
+	if(walker->type == BS_NODE_INSTANCE) {
+	    pathlen += walker->valueLen;
+	    pathlen++;
+	}
+#endif
 	if(out != NULL) {
+
+
+#if 0
+
+	    if(walker->type == BS_NODE_INSTANCE) {
+		target -= walker->valueLen;
+		memcpy(target, walker->value, walker->valueLen);
+		target--;
+		*target = BS_PATH_SEP;
+	    }
+#endif
 	    target -= walker->nameLen;
 	    memcpy(target, walker->name, walker->nameLen);
 	    if(walker->parent->parent != NULL) {
@@ -2220,6 +2352,25 @@ size_t bsGetEscapedPath(BsNode *node, char* out, const size_t outlen) {
 	    pathlen++;
 	}
 
+#if 0
+	if(walker->type == BS_NODE_INSTANCE) {
+
+	    size_t evlen = bsEscapeStr(walker->value, NULL) - 1;
+	    char evalue[evlen + 1];
+	    bsEscapeStr(walker->value, evalue);
+
+	    pathlen += evlen;
+	    pathlen++;
+
+	    if(out != NULL) {
+		target -= evlen;
+		memcpy(target, evalue, evlen);
+		target--;
+		*target = BS_PATH_SEP;
+	    }
+
+	}
+#endif
 	if(out != NULL) {
 	    target -= elen;
 	    memcpy(target, ename, elen);
@@ -2270,8 +2421,6 @@ static inline size_t cleanupQuery(char* query) {
     return slen;
 }
 
-
-
 /* return a new string containing cleaned up query */
 static inline char* getCleanQuery(const char* query) {
 
@@ -2316,12 +2465,12 @@ static inline uint32_t bsGetPathHash(BsNode* root, const char* query) {
 
 }
 
-/* find a descendant of node based on path, and verify that path matches */
+/* find a single / last descendant of node based on path, and verify that path matches */
 BsNode* bsNodeGet(BsDict* dict, BsNode *node, const char* qry) {
 
     BsToken tok;
     uint32_t hash;
-    BsNode *n = node;
+    BsNode *n = NULL;
     char *cqry;
     char *marker;
 
@@ -2337,6 +2486,7 @@ BsNode* bsNodeGet(BsDict* dict, BsNode *node, const char* qry) {
 
 		for(n = bsIndexGet(dict->index, hash); n != NULL; n = n->_indexNext) {
 		    BS_GETNP(n, path);
+		    /* getCleanQuery() always produces either a null-terminated string or NULL */
 		    if(!strcmp(cqry, path)) {
 		        free(cqry);
 		        return n;
@@ -2345,16 +2495,43 @@ BsNode* bsNodeGet(BsDict* dict, BsNode *node, const char* qry) {
 	    /* otherwise do a naive search */
 	    } else {
 
-		marker = (char*)qry;
-		/* iterate over tokens, moving down the tree as we find children token by token */
-		while((n != NULL) && unescapeToken(&tok, &marker, BS_PATH_SEP)) {
+		LList* l = llCreate();
+		/* we start with the parent node */
+		llAppendItem(l, node);
+		LListMember *mb;
+		LList* m = NULL;
 
-		    n = _bsGetChild(dict, n, tok.data, tok.len);
+		marker = (char*)qry;
+
+		/* iterate over tokens, moving down the tree as we find children token by token */
+		while((l->count > 0) && unescapeToken(&tok, &marker, BS_PATH_SEP)) {
+
+		     /* iterate over all children matching path so far*/
+		    LL_FOREACH_DYNAMIC(l, mb) {
+
+			 /* append all children matching current token */
+			 m = _bsGetChildren(m, dict, mb->value, tok.data, tok.len);
+
+		    }
+
+		    /* drop the original list */
+		    llFree(l);
+
+		    /* we will now iterate over the deeper list */
+		    l = m;
+		    m = NULL;		    
+
 		    free(tok.data);
 
 		}
 
 		free(cqry);
+
+		if(l->count > 0) {
+		    n = l->_firstChild->value;
+		}
+
+		llFree(l);
 		return n;
 
 	    }
@@ -2384,6 +2561,17 @@ BsNode* bsGetChild(BsDict* dict, BsNode *parent, const char* name) {
 
     return _bsGetChild(dict, parent, name, strlen(name));
 }
+
+/* public version that calls strlen */
+LList* bsGetChildren(LList* out, BsDict* dict, BsNode *parent, const char* name) {
+
+    if(name == NULL) {
+	return NULL;
+    }
+
+    return _bsGetChildren(out, dict, parent, name, strlen(name));
+}
+
 
 /*
  * Get parent's n-th child - simple iterative search. Yes, we could have
@@ -2482,17 +2670,10 @@ static void *bsDupCallback(BsDict *dict, BsNode *node, void* user, void* feedbac
     BsNode* target = feedback;
 
     /* bsCreate is called as opposed to _bsCreate, which takes care of duplicating the name */
-    BsNode* newnode = bsCreateNode(dest, target, node->type, node->name);
+    BsNode* newnode = bsCreateNode(dest, target, node->type, node->name, node->value);
 
     if(newnode != NULL) {
 	newnode->flags = node->flags;
-	/* duplicate value */
-	if(node->type == BS_NODE_LEAF && node->value != NULL) {
-	    size_t vlen = strlen(node->value);
-	    xmalloc(newnode->value, vlen + 1);
-	    memcpy(newnode->value, node->value, vlen);
-	    newnode->value[vlen] = '\0';
-	}
     }
 
     return newnode;
