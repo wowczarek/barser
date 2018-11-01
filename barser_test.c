@@ -230,7 +230,19 @@ int main(int argc, char **argv) {
     }
 
     if(dump) {
+
+	    fprintf(stderr, "Dumping dictionary contents... ");
+	    fflush(stderr);
+
+	    DUR_START(test);
 	    bsDump(stdout, dict);
+	    DUR_END(test);
+
+	    fprintf(stderr, "done.\n");
+	    fprintf(stderr, "Dumped in %s (%s), %.03f MB/s, %zu nodes, %.0f nodes/s\n",
+		DUR_HUMANTIME(test_delta), unindexed ? "unindexed" : "indexed",
+		(1000000000.0 / test_delta) * (len / 1000000.0),
+		dict->nodecount, (1000000000.0 / test_delta) * dict->nodecount);
     }
 
     BsNode* node;
@@ -261,7 +273,7 @@ int main(int argc, char **argv) {
 
     if(randomquery) {
 
-    querycount = min(querycount, dict->nodecount);
+	querycount = min(querycount, dict->nodecount);
 
 	fprintf(stderr, "Extracting random %d nodes... ", querycount);
 
