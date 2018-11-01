@@ -39,8 +39,14 @@ remake: clean all
 
 refast: clean fast
 
-debug: CFLAGS+=-g
+colldebug: CFLAGS += -DCOLL_DEBUG
+colldebug: all
+
+recolldebug: CFLAGS += -DCOLL_DEBUG
+recolldebug: clean all
+
+debug: CFLAGS += -g
 debug: all
 
-redebug: CFLAGS+=-g
+redebug: CFLAGS += -g
 redebug: clean all
