@@ -114,14 +114,15 @@
 
 /* node types */
 enum {
-    BS_NODE_ROOT = 0,
-    BS_NODE_BRANCH,
-    BS_NODE_LEAF,
-    BS_NODE_ARRAY,
-    BS_NODE_INSTANCE,
+    BS_NODE_ROOT = 0,		/* root node */
+    BS_NODE_BRANCH,		/* branch node */
+    BS_NODE_LEAF,		/* leaf node */
+    BS_NODE_ARRAY,		/* array node */
+    BS_NODE_INSTANCE,		/* instance (single child) */
+    BS_NODE_VARIABLE,		/* a variable. these are ignored by fetches / queries and only retrieved by bsGetVariable() */
 };
 
-/* node value types */
+/* node value types - for if/when automatic value parsing is implemented */
 enum {
     BS_VAL_NULL,
     BS_VAL_STRING,
@@ -144,7 +145,7 @@ enum {
     BS_PERROR			/* generic / internal / other error */
 };
 
-/* node operation result codes */
+/* node operation result codes (possibly to be removed) */
 enum {
     BS_NODE_OK = 0,		/* Whatever went OK */
     BS_NODE_NOT_FOUND,		/* Node not found in dictionary */
@@ -156,6 +157,7 @@ enum {
 /* shorthand macro to check if (int!) c is a character of class cl (above) */
 #define chclass(c, cl) (chflags[(unsigned char)c] & (cl))
 
+/* a string token */
 typedef struct {
     char* data;
     size_t len;
@@ -195,7 +197,7 @@ typedef struct {
     /* token offset - if any "special" / modifier tokens are found and ignored */
     unsigned int tokenOffset;
 
-    /* token cache flags set by modifiers */
+    /* token cache flags typically set by modifiers */
     unsigned int flags;
 
 } BsState;
