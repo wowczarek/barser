@@ -79,7 +79,7 @@
      *
      * note: arrays require to have a name, unless they are nested in other arrays
      *
-     * ----- COLLECTION node:
+     * ----- INSTANCE node:
      *
      * Again functionally same as branch, but holds "instances" and
      * may be parsed and displayed differently:
@@ -118,7 +118,7 @@ enum {
     BS_NODE_BRANCH,
     BS_NODE_LEAF,
     BS_NODE_ARRAY,
-    BS_NODE_COLLECTION,
+    BS_NODE_INSTANCE,
 };
 
 /* node value types */
@@ -192,6 +192,12 @@ typedef struct {
     /* current adjacent token count */
     unsigned int tokenCount;
 
+    /* token offset - if any "special" / modifier tokens are found and ignored */
+    unsigned int tokenOffset;
+
+    /* token cache flags set by modifiers */
+    unsigned int flags;
+
 } BsState;
 
 typedef struct BsDict BsDict;
@@ -210,8 +216,9 @@ struct BsNode {
     BsNode* _indexNext;			/* singly linked list to hold index chains */
 
     size_t nameLen;			/* name length */
+    size_t valueLen;			/* value length */
     uint32_t hash;			/* sum of hashes from root to this guy */
-    unsigned int childCount;			/* fat bastard on benefits and dodgy DLA */
+    unsigned int childCount;		/* fat bastard on benefits and dodgy DLA */
     unsigned int type;			/* node type enum */
     unsigned int flags;			/* flags - quoted name, quoted value, etc. */
 
@@ -221,16 +228,27 @@ struct BsNode {
 
 };
 
-/* dictionary flags */
-#define BS_NONE		0		/* also a universal zero constant */
-#define BS_NOINDEX	(1<<0)		/* this dictionary instance does not index nodes */
-#define BS_READONLY	(1<<1)		/* this dictionary becomes read-only once parsed */
-
 /* node flags */
-#define BS_QUOTED_VALUE (1<<0)		/* node name was specified as quoted string */
-#define BS_QUOTED_NAME  (1<<1)		/* node value was specified as quoted string */
-#define BS_INDEXED	(1<<2)		/* node was indexed */
 
+#define BS_QUOTED_VALUE  (1<<0)		/* node name was specified as quoted string */
+#define BS_QUOTED_NAME   (1<<1)		/* node value was specified as quoted string */
+#define BS_INDEXED	 (1<<2)		/* node was indexed */
+#define BS_MODIFIED	 (1<<3)		/* node contents were changed during merge */
+/* parent flags */
+#define BS_INACTIVE	 (1<<4)		/* inactive node ("inactive:" modifier)  - exists but ignored */
+#define BS_REMOVED	 (1<<5)		/* node was removed during merge */
+#define BS_ADDED	 (1<<6)		/* node was added during merge */
+#define BS_GENERATED	 (1<<7)		/* node was generated with "generate:" modifier */
+/* inherited flags */
+#define BS_INACTIVECHLD  (1<<8)		/* descendant of an inactive node */
+#define BS_REMOVEDCHLD   (1<<9)		/* descendant of a removed node */
+#define BS_ADDEDCHLD     (1<<10)	/* descendant of an added node */
+#define BS_GENERATEDCHLD (1<<11)	/* descendant of a generated node */
+
+#define BS_INHERITED_SHIFT 4		/* distance between parent and inherited flags */
+
+/* set of flags inherited from parent - these are shifted to *CHLD for descendants */
+#define BS_INHERITED_FLAGS (BS_INACTIVE | BS_REMOVED | BS_ADDED | BS_GENERATED)
 
 /* the dictionary */
 struct BsDict {
@@ -244,6 +262,11 @@ struct BsDict {
     size_t nodecount;		/* total node count. */
     uint32_t flags;		/* dictionary flags */
 };
+
+/* dictionary flags */
+#define BS_NONE		0		/* also a universal zero constant */
+#define BS_NOINDEX	(1<<0)		/* this dictionary instance does not index nodes */
+#define BS_READONLY	(1<<1)		/* this dictionary becomes read-only once parsed */
 
 /*
  * callback type. parameters: dict, node, user, feedback, cont
@@ -267,8 +290,8 @@ size_t getFileBuf(char **buf, const char *fileName);
 /* create and initialise a dictionary */
 BsDict *bsCreate(const char *name, const uint32_t flags);
 
-/* create new node in dictionary, attached to parent, of type type with name name */
-BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, const char* name);
+/* create new node in dictionary, attached to parent, of type type with name name and (optionally) value value */
+BsNode* bsCreateNode(BsDict *dict, BsNode *parent, const unsigned int type, const char* name, const char* value);
 
 /* clean up and free dictionary */
 void bsFree(BsDict *dict);
@@ -303,6 +326,8 @@ BsNode* bsGet(BsDict *dict, const char* qry);
 BsNode* bsNodeGet(BsDict* dict, BsNode *node, const char* qry);
 /* get (first) parent's child of the given name / check if child exists */
 BsNode* bsGetChild(BsDict* dict, BsNode *parent, const char* name);
+/* get a list of all parent's children with given name */
+LList* bsGetChildren(LList* out, BsDict* dict, BsNode *parent, const char* name);
 /* iteratively grab parent's n-th child (starting from 0!) */
 BsNode* bsNthChild(BsDict* dict, BsNode *parent, const unsigned int childno);
 
@@ -314,6 +339,7 @@ BsNode* bsWalk(BsDict *dict, void* user, BsCallback callback);
 BsNode* bsNodePWalk(BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback, bool escape);
 /* same as bsWalk, but every callback is passed a BsToken as feedback, with node's full path */
 BsNode* bsPWalk(BsDict *dict, void* user, BsCallback callback, bool escape);
+
 /* run a callback recursively on node, return linked list that callback permitted */
 LList* bsNodeFilter(LList* list, BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback);
 /* run a callback recursively on dictionary, return linked list that callback permitted */
@@ -322,6 +348,7 @@ LList* bsFilter(LList *list, BsDict *dict, void* user, BsCallback callback);
 LList* bsNodePFilter(LList *list, BsDict *dict, BsNode *node, void* user, void *feedback, BsCallback callback, bool escape);
 /* run a callback recursively on dictionary, return linked list that callback permitted, callback gets node path */
 LList* bsPFilter(LList *list, BsDict *dict, void* user, BsCallback callback, bool escape);
+
 /* callback for use with bsFilter, checking if node value contains string */
 void* bsValueContainsCb(BsDict *dict, BsNode *node, void* user, void* feedback, bool* matches);
 /* callback for use with bsFilter, checking if node value contains string */
