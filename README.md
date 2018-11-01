@@ -226,6 +226,16 @@ Character class mappings (`barser_defaults.h`) assign flags rather than unique c
 
 Yes, this is all very loose, but *flexible* is the key.
 
+### Node modifiers and inherited flags
+
+An extension inspired by JunOS syntax is _node modifiers_. First tokens in a sequence that end with `:` are potential modifiers.
+
+A modifier either sets a specific flag on the following node, or performs other actions. The first modifier implemented is `inactive:`, which marks the following node with `BS_INACTIVE` flag, and all its children recursively with `BS_INACTIVECHLD` flag - this happens automatically during node creation. A set of flags is inherited by every child node if the top parent has it. The `inactive` flag means that although the node exists, it is invisible / ignored. This is a structural equivalent of commenting nodes out, with the added benefit that it can be instantly reversed by flipping the flag, whereas content commented out never makes it into the structure.
+
+Further modifiers are planned, namely `generate:`, to allow generating content, `variable:` to define variables and `template:` to pre-populate nodes with defaults;
+
+Certain node flags are inherited by node's children recursively on insertion. These can be found in `barser.h`. If a node is marked with one of those flags, every descendant of this node will have a shifted version (`*CHLD`) of this flag set. This applies to `BS_INACTIVE` `BS_GENERATED`, `BS_REMOVED` (for when merge/dif is implemented), etc. The meaning of the regular and `*CHLD` flag is unchanged, but this is a hint for the output formatter to only treat the topmost node in a special way, such as by printing an `inactive:` prefix.
+
 ## Operation
 
 Barser scans the input buffer byte by byte, skipping whitespaces, waiting for control characters and recognising character classes based on a 256-slot lookup table. As the scanner state machine passes through different stages, events are raised and processed accordingly. Barser accumulates string tokens in a stack and processes them once a specific control element or token count is reached - the scanner raises an event which is then picked up by the worker function inserting nodes.
