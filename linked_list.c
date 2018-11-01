@@ -61,6 +61,7 @@ LList* llCreate() {
 
     out->_firstChild = NULL;
     out->_lastChild = NULL;
+    out->count = 0;
     return out;
 
 }
@@ -79,6 +80,7 @@ void llEmpty(LList* list) {
     }
 
     list->_firstChild = list->_lastChild = NULL;
+    list->count = 0;
 
 }
 
@@ -101,6 +103,7 @@ void llAppendItem(LList* list, void* item) {
 
 	m->value = item;
 	LL_APPEND_DYNAMIC(list, m);
+	list->count++;
 
     }
 
@@ -115,6 +118,7 @@ void llPrependItem(LList* list, void* item) {
 
 	m->value = item;
 	LL_PREPEND_DYNAMIC(list, m);
+	list->count++;
 
     }
 
@@ -126,17 +130,40 @@ void llRemoveItem(LList* list, const void* item) {
 
     if(list != NULL) {
 
-	LListMember* m = NULL;
+	LListMember* n = list->_firstChild;
+	LListMember* m = list->_lastChild;
 
-	LL_FOREACH_DYNAMIC(list, m) {
-	    if(m->value == item) {
-		break;
+	/* until we meet - linked list search in both directions */
+	while(m != NULL && n != NULL) {
+
+	    if(n->value == item) {
+		LL_REMOVE_DYNAMIC(list, n);
+		free(n);
+		list->count--;
+		return;
 	    }
-	}
 
-	if(m != NULL) {
-	    LL_REMOVE_DYNAMIC(list, m);
-	    free(m);
+	    /* we've met */
+	    if(m == n) {
+	        return;
+	    }
+
+	    if(m->value == item) {
+		LL_REMOVE_DYNAMIC(list, m);
+		free(m);
+		list->count--;
+		return;
+	    }
+
+	    n = n->_next;
+
+	    /* we're about to pass each other */
+	    if(m == n) {
+		return;
+	    }
+
+	    m = m->_prev;
+
 	}
 
     }
@@ -148,16 +175,36 @@ void llRemove(LList* list, LListMember *member) {
 
     if(list != NULL) {
 
-	LListMember* m = NULL;
+	LListMember* n = list->_firstChild;
+	LListMember* m = list->_lastChild;
 
-	LL_FOREACH_DYNAMIC(list, m) {
-	    if (m == member) {
-		break;
+	while(m != NULL && n != NULL) {
+
+	    if(n == member) {
+		LL_REMOVE_DYNAMIC(list, n);
+		free(n);
+		list->count--;
+		return;
 	    }
-	}
 
-	if(m != NULL) {
-	    LL_REMOVE_DYNAMIC(list, m);
+	    if(m == n) {
+	        return;
+	    }
+
+	    if(m == member) {
+		LL_REMOVE_DYNAMIC(list, m);
+		free(m);
+		list->count--;
+		return;
+	    }
+
+	    n = n->_next;
+
+	    if(m == n) {
+		return;
+	    }
+
+	    m = m->_prev;
 
 	}
 
@@ -171,13 +218,34 @@ LListMember* llGetMember(LList* list, const LListMember * member) {
 
     if(list != NULL) {
 
-	LListMember* m = NULL;
+	LListMember* n = list->_firstChild;
+	LListMember* m = list->_lastChild;
 
-	LL_FOREACH_DYNAMIC(list, m) {
-	    if (m == member) {
+	while(m != NULL && n != NULL) {
+
+	    if(n == member) {
+		return n;
+	    }
+
+	    if(m == n) {
+	        return NULL;
+	    }
+
+	    if(m == member) {
 		return m;
 	    }
+
+	    n = n->_next;
+
+	    if(m == n) {
+		return NULL;
+	    }
+
+	    m = m->_prev;
+
 	}
+
+
 
     }
 
@@ -190,13 +258,33 @@ LListMember* llGetItemHolder(LList* list, const void *item) {
 
     if(list != NULL) {
 
-	LListMember* m = NULL;
+	LListMember* n = list->_firstChild;
+	LListMember* m = list->_lastChild;
 
-	LL_FOREACH_DYNAMIC(list, m) {
-	    if (m->value == item) {
+	while(m != NULL && n != NULL) {
+
+	    if(n->value == item) {
+		return n;
+	    }
+
+	    if(m == n) {
+	        return NULL;
+	    }
+
+	    if(m->value == item) {
 		return m;
 	    }
+
+	    n = n->_next;
+
+	    if(m == n) {
+		return NULL;
+	    }
+
+	    m = m->_prev;
+
 	}
+
 
     }
 
