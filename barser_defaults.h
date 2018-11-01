@@ -60,8 +60,9 @@
 #define BS_ENDARRAY_CHAR        ']'	/* end of array */
 #define BS_ARRAYSEP_CHAR        ','	/* optional, really used for output only */
 #define BS_INDENT_CHAR          ' '	/* indentation */
+#define BS_MODIFIER_CHAR        ':'	/* node modifier suffix */
 
-#define BS_PATH_SEP		'/'	/* path separator for queries */
+#define BS_PATH_SEP             '/'	/* path separator for queries */
 
 /* maximum line width displayed when showing an error */
 #define BS_ERRORDUMP_LINEWIDTH 80
@@ -86,6 +87,7 @@
 #define BF_ESC		(1<<6)	/* escapable characters */
 #define BF_ESS		(1<<7)	/* escape sequences */
 #define BF_WSP		(1<<8)	/* proper whitespace characters */
+#define BF_QES		(1<<9)  /* query escapable characters */
 
 /*
  * Static character to class mappings. a character can belong to multiple classes,
