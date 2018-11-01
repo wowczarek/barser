@@ -208,6 +208,7 @@ struct LListMember {
 /* linked list head */
 typedef struct {
     LL_HOLDER(LListMember);
+    int count;
 } LList;
 
 
