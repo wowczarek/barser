@@ -23,18 +23,19 @@ The "Bastard" in the name refers to the supported format, not the parser itself,
 - User-friendly parser error output (line number / position, contents of the affected line)
 - Very loose and flexible input format
 - Support for C-style and Unix-style comments
-- Support for C-style multiline comments
+- Support for C-style multiline comments and multiline strings
 - Support for basic escape characters in quoted strings
 - Character classes and meanings all defined in a separate header file, `barser_defaults.h`
 - Basic operations on the resulting structure - searches, retrieving nodes, duplication, deletion, copying, moves, renaming
 - Dictionary walks with callbacks
 - Dictionary filtering with callbacks
 - Indexed operation ([red-black tree](https://github.com/wowczarek/rbt) based) or indexless
+- Switching from unindexed to indexed operation
 
 ## Todo / progress
 
 - Implement a good node hashing strategy **[done]**. Using xxhash of node name, XOR-mixed with parent's hash. Mixing works reasonably well - total of 22k collisions for citylots.js at 13M nodes, max nodes per hash 2.
-- Implement indexing of inserted tree nodes using a red-black tree index initially **[slow, but done]**
+- Implement indexing of inserted tree nodes using a red-black tree index (at least initially) **[slow, but done]**
 - Implement dynamic linked lists to deal with collisions (this is beyond the index and any collision resolving strategy - fast, non-crypto hashes WILL collide) **[done]**
 - Implement direct queries / node retrieval in the form of "/node/child/grandchild" **[done]** (trailing and leading "`/`"'s are removed)
 - Implement node renaming (and thus recursive rehashing) **[done]**
@@ -43,12 +44,12 @@ The "Bastard" in the name refers to the supported format, not the parser itself,
 - Implement callback walks / iteration **[done]**
 - Implement walks with node's path passed to callback **[done]**
 - Implement filter walks, returning a linked list of nodes accepted **[done]**
-- Write a proper makefile that builds a static library and installs it **[nearly done]**
-- Implement support for multiline quoted strings
+- Write a proper makefile that builds a static library and installs it **[done / needs source reorganised]**
+- Implement support for multiline quoted strings **[done]**
 - Implement merge and diff operations
 - Implement stage 2 parsing of stored string values to other data types
 - Write some documentation **[yeah, right]**
-- Implement a simple query language - target is to support at least `"*"` for _any string_ and `"?"` for _any character_
+- Implement a simple query language, XPATH-like - target is to support at least `"*"` for _any string_ and `"?"` for _any character_, `/` for path searches, `>` for child searches, etc. Will include compiled queries.
 - Implement variable support / string replacement (`@variables { bob "square";} shapes { box "@bob@"; }`) and automatic content generation ( `@generate "seq var 1 1000" "test@var@" { hello 5; this "number@var@";}`)
 - Investigate wide character support **[meh]**
 - Implement alternative output formats (JSON output, XML output - maybe)
@@ -250,7 +251,7 @@ $ ./barser_test -h
 
 barser_test (c) 2018: Wojciech Owczarek, a flexible hierarchical configuration parser
 
-usage: barser_test <-f filename> [-q query] [-Q] [-N NUMBER] [-p] [-d] [-X]
+usage: barser_test <-f filename> [-q query] [-Q] [-N NUMBER] [-p] [-d] [-X] [-x] [-r]
 
 -f filename     Filename to read data from (use "-" to read from stdin)
 -q query        Retrieve nodes based on query and dump to stdout
@@ -259,6 +260,8 @@ usage: barser_test <-f filename> [-q query] [-Q] [-N NUMBER] [-p] [-d] [-X]
 -p              Dump parsed data to stdout
 -d              Test dictionary duplication
 -X              Build an unindexed dictionary
+-x              Build an unindexed dictionary, but index it after parsing
+-r              Build index if unindexed and reindex
 ```
 
 **Example output for a ~180 MB's worth of JunOS config:**
