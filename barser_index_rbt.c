@@ -144,12 +144,15 @@ void bsIndexDelete(void *index, BsNode* node) {
 	if(n != NULL) {
 
 	    if(prev == NULL) {
-		inode->value = NULL;
+		/* this index node is now empty, delete it */
+		rbDeleteNode(tree, inode);
 	    } else {
 		prev->_indexNext = n->_indexNext;
 	    }
 
 	    n->_indexNext = NULL;
+	    /* clear indexed flag */
+	    n->flags &= ~BS_INDEXED;
 
 	}
 
