@@ -201,6 +201,10 @@ static void* bsRehashCallback(BsDict *dict, BsNode *node, void* user, void* feed
 static void bsErrorHint(BsState *state);
 /* main buffer scanner / lexer state machine */
 static inline void bsScan(BsState *state);
+/* node indexing callback - used when indexing a previously unindexed dictionary */
+static void* bsIndexCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* stop);
+/* node reindexing callback - used when forcing a reindex */
+static void* bsReindexCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* stop);
 /* expand escape sequences and produce a clean query trimmed on both ends, matching the bsGetPath output */
 static inline size_t cleanupQuery(char* query);
 /* return a new string containing cleaned up query */
@@ -1589,12 +1593,15 @@ void bsPrintError(BsState *state) {
 	    case BS_PERROR_NULL:
 		fprintf(stderr, "Dictionary object is NULL\n");
 		return;
-
+	    case BS_PERROR_QUOTED:
+		restorestate(state);
+		fprintf(stderr, "Unterminated quoted string");
+		break;
 	    default:
 		fprintf(stderr, "Unexpected parser error 0x%x\n", state->parseError);
 	}
 
-	fprintf(stderr," at line %zd position %zd:\n\n", state->lineno, state->linepos);
+	fprintf(stderr," at line %zd position %zd:\n\n", state->lineno, state->linepos + 1);
 	bsErrorHint(state);
 
     }
@@ -1671,7 +1678,16 @@ static inline void bsScan(BsState *state) {
 		tok->quoted = ~0;
 		xmalloc(tok->data, ssize + 1);
 		bool captured;
+
+	        nextbatch:
+
 		while(c != qchar) {
+
+		    if(cclass(BF_NLN)) {
+			    state->parseEvent = BS_ERROR;
+			    state->parseError = BS_PERROR_QUOTED;
+			    return;
+		    }
 
 		    if(c == BS_ESCAPE_CHAR) {
 			c = bsForward(state);
@@ -1700,7 +1716,29 @@ static inline void bsScan(BsState *state) {
 			xrealloc(tok->data, tok->data, ssize + 1);
 		    }
 		}
+		
 		c = bsForward(state);
+
+		/* try a multiline string */
+		if(c == BS_ESCAPE_CHAR) {
+
+		    /* skip whitespaces and newlines */
+		    do {
+			savestate(state);
+			c = bsForward(state);
+		    } while(cclass(BF_WSP | BF_NLN));
+
+		    /* continue consuming multiline string */
+		    if(c == qchar) {
+			c = bsForward(state);
+			goto nextbatch;
+		    } else {
+			state->parseEvent = BS_ERROR;
+			state->parseError = BS_PERROR_QUOTED;
+			return;
+		    }
+		}
+
 		tok->data[tok->len] = '\0';
 
 		/* raise a "got token" event */
@@ -2271,6 +2309,67 @@ done:
     /* return a copy of the state value so we can check for errors */
     return state;
 
+}
+
+/* node indexing callback - used when indexing a previously unindexed dictionary */
+static void* bsIndexCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* stop) {
+
+    if(node->parent != NULL && !(node->flags & BS_INDEXED)) {
+
+	bsIndexPut(dict, node);
+
+    }
+
+    return NULL;
+
+}
+
+/* node reindexing callback - used when forcing a reindex */
+static void* bsReindexCallback(BsDict *dict, BsNode *node, void* user, void* feedback, bool* stop) {
+
+    if(node->parent != NULL) {
+
+	if (node->flags & BS_INDEXED) {
+	    bsIndexDelete(dict->index, node);
+	}
+
+	bsIndexPut(dict, node);
+
+    }
+
+    return NULL;
+
+}
+
+/* index all unindexed nodes and enable indexing */
+void bsIndex(BsDict* dict) {
+
+    if(dict != NULL) {
+
+	/* clear BS_NOINDEX flag */
+	if(dict->flags & BS_NOINDEX) {
+	    if(dict->index == NULL) {
+		dict->index = bsIndexCreate();
+	    }
+	    dict->flags &= ~BS_NOINDEX;
+	}
+
+	bsWalk(dict, NULL, bsIndexCallback);
+
+    }
+
+}
+
+/* force full reindex - but not a full rehash */
+void bsReindex(BsDict *dict) {
+
+    if(dict != NULL) {
+
+	if(!(dict->flags & BS_NOINDEX)) {
+	    bsWalk(dict, NULL, bsReindexCallback);	    
+	}
+
+    }
 }
 
 /*

@@ -142,6 +142,7 @@ enum {
     BS_PERROR_LEVEL,		/* unbalanced brackes */
     BS_PERROR_BLOCK,		/* unexpected structure element */
     BS_PERROR_NULL,		/* uninitialised / NULL dictionary */
+    BS_PERROR_QUOTED,		/* unterminated quoted string */
     BS_PERROR			/* generic / internal / other error */
 };
 
@@ -313,6 +314,12 @@ BsNode* bsMoveNode(BsDict* dict, BsNode* node, BsNode* newparent, const char* ne
 
 /* parse contents of a char buffer */
 BsState bsParse(BsDict *dict, char *buf, size_t len);
+
+/* index all unindexed nodes and enable indexing */
+void bsIndex(BsDict* dict);
+
+/* force full reindex - but not a full rehash */
+void bsReindex(BsDict *dict);
 
 /* display parser error */
 void bsPrintError(BsState *state);
