@@ -102,7 +102,7 @@ static void* filtercb(BsDict *dict, BsNode *node, void* user, void* feedback, bo
 static void usage() {
 
     fprintf(stderr, "\nbarser_test (c) 2018: Wojciech Owczarek, a flexible hierarchical configuration parser\n\n"
-	   "usage: barser_test <-f filename> [-q query] [-Q] [-N NUMBER] [-p] [-d] [-X]\n"
+	   "usage: barser_test <-f filename> [-q query] [-Q] [-N NUMBER] [-p] [-d] [-X] [-x] [-r]\n"
 	   "\n"
 	   "-f filename     Filename to read data from (use \"-\" to read from stdin)\n"
 	   "-q query        Retrieve nodes based on query and dump to stdout\n"
@@ -111,6 +111,8 @@ static void usage() {
 	   "-p              Dump parsed data to stdout\n"
 	   "-d              Test dictionary duplication\n"
 	   "-X              Build an unindexed dictionary\n"
+	   "-x              Build an unindexed dictionary, but index it after parsing\n"
+	   "-r              Build index if unindexed and reindex\n"
 	   "\n", QUERYCOUNT);
 
 }
@@ -131,10 +133,12 @@ int main(int argc, char **argv) {
     bool dump = false;
     bool randomquery = false;
     bool unindexed = false;
+    bool postindex = false;
+    bool reindex = false;
     uint32_t querycount = QUERYCOUNT;
 
 
-	while ((c = getopt(argc, argv, "?hf:q:QN:pdX")) != -1) {
+	while ((c = getopt(argc, argv, "?hf:q:QN:pdXxr")) != -1) {
 
 	    switch(c) {
 		case 'f':
@@ -157,6 +161,12 @@ int main(int argc, char **argv) {
 		    break;
 		case 'X':
 		    unindexed = true;
+		    break;
+		case 'x':
+		    postindex = true;
+		    break;
+		case 'r':
+		    reindex = true;
 		    break;
 		case '?':
 		case 'h':
@@ -205,11 +215,14 @@ int main(int argc, char **argv) {
 
     DUR_START(test);
     BsState state = bsParse(dict, buf, len);
+    if(postindex) {
+	bsIndex(dict);
+    }
     DUR_END(test);
 
     fprintf(stderr, "done.\n");
     fprintf(stderr, "Parsed in %s (%s), %.03f MB/s, %zu nodes, %.0f nodes/s\n",
-		DUR_HUMANTIME(test_delta), unindexed ? "unindexed" : "indexed",
+		DUR_HUMANTIME(test_delta), (unindexed && postindex) ? "post-indexed" : unindexed ? "unindexed" : "indexed",
 		(1000000000.0 / test_delta) * (len / 1000000.0),
 		dict->nodecount, (1000000000.0 / test_delta) * dict->nodecount);
 #ifdef COLL_DEBUG
@@ -222,6 +235,35 @@ int main(int argc, char **argv) {
 	bsPrintError(&state);
 	return -1;
 
+    }
+
+    if(reindex) {
+
+	if(unindexed & !postindex) {
+
+	    fprintf(stderr, "Indexing... ");
+	    fflush(stderr);
+
+	    DUR_START(test);
+	    bsIndex(dict);
+	    DUR_END(test);
+
+	    fprintf(stderr, "done.\n");
+	    fprintf(stderr, "Indexed in %s, %zu nodes, %.0f nodes/s\n",
+		    DUR_HUMANTIME(test_delta), nodecount, (1000000000.0 / test_delta) * nodecount);
+
+	}
+
+	fprintf(stderr, "Reindexing... ");
+	fflush(stderr);
+
+	DUR_START(test);
+	bsReindex(dict);
+	DUR_END(test);
+
+	fprintf(stderr, "done.\n");
+	fprintf(stderr, "Reindexed in %s, %zu nodes, %.0f nodes/s\n",
+		DUR_HUMANTIME(test_delta), nodecount, (1000000000.0 / test_delta) * nodecount);
     }
 
     if(!bsTest(dict)) {
@@ -240,7 +282,7 @@ int main(int argc, char **argv) {
 
 	    fprintf(stderr, "done.\n");
 	    fprintf(stderr, "Dumped in %s (%s), %.03f MB/s, %zu nodes, %.0f nodes/s\n",
-		DUR_HUMANTIME(test_delta), unindexed ? "unindexed" : "indexed",
+		DUR_HUMANTIME(test_delta), (unindexed && !postindex) ? "unindexed" : "indexed",
 		(1000000000.0 / test_delta) * (len / 1000000.0),
 		dict->nodecount, (1000000000.0 / test_delta) * dict->nodecount);
     }
@@ -334,7 +376,7 @@ int main(int argc, char **argv) {
 	DUR_END(test);
 	fprintf(stderr, "done.\n");
 	fprintf(stderr, "Found %d out of %d nodes (%s), average %s per fetch\n", found, querycount,
-		unindexed ? "unindexed" : "indexed", DUR_HUMANTIME(test_delta / querycount));
+		(unindexed && !postindex) ? "unindexed" : "indexed", DUR_HUMANTIME(test_delta / querycount));
 
 	fprintf(stderr, "Freeing test data... ");
 	fflush(stderr);
